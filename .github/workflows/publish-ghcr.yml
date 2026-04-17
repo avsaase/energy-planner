@@ -2,8 +2,8 @@ name: Build And Publish Addon Image
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
@@ -56,14 +56,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Read Add-on Version
+        id: addon_version
+        run: |
+          VERSION="$(awk -F '"' '/^version:/{print $2; exit}' config.yaml)"
+          if [ -z "$VERSION" ]; then
+            echo "Failed to extract version from config.yaml"
+            exit 1
+          fi
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Extract Docker Metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/${{ matrix.arch }}-energy-planner
           tags: |
-            type=ref,event=tag
-            type=semver,pattern={{version}}
+            type=raw,value=${{ steps.addon_version.outputs.value }}
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
 
