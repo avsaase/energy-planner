@@ -1,9 +1,15 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    fs::{File, remove_file},
+    sync::Arc,
+    time::Duration,
+};
 
+use anyhow::Context;
 use energy_planner::{
     home_assistant::{addon::AddonOptions, client::HaClient},
     optimizer, planning_path, prepare_optimizer_input,
     server::{AppState, router},
+    types::Planning,
 };
 use jiff::{RoundMode, Unit, Zoned, ZonedRound};
 use tokio::sync::{Notify, RwLock};
@@ -32,11 +38,17 @@ async fn main() -> anyhow::Result<()> {
         start_plan: Arc::new(Notify::new()),
     };
 
-    // Read plan from file if it exists, so we have something to show in the UI immediately
-    if let Ok(file) = std::fs::File::open(planning_path()) {
-        let plan = serde_json::from_reader(file)?;
+    if let Ok(x) = File::open(planning_path())
+        .context("Failed to read file")
+        .and_then(|file| {
+            serde_json::from_reader::<_, Planning>(file).context("Failed to parse planning file")
+        })
+    {
         info!("Loaded existing plan from disk");
-        app_state.current_plan.write().await.replace(plan);
+        app_state.current_plan.write().await.replace(x);
+    } else {
+        error!("Failed to read planning from disk, starting with empty plan");
+        let _ = remove_file(planning_path());
     }
 
     info!("Starting planning loop");
@@ -69,9 +81,12 @@ async fn planning_loop(
 
         let now = Zoned::now();
 
-        let input_data = prepare_optimizer_input(now.clone(), &ha_client, &addon_options)
+        let Ok(input_data) = prepare_optimizer_input(now.clone(), &ha_client, &addon_options)
             .await
-            .inspect_err(|e| error!(error = %e, "Error preparing planning input"))?;
+            .inspect_err(|e| error!(error = %e, "Error preparing planning input"))
+        else {
+            continue;
+        };
 
         info!(
             "Prepared optimizer input data from {} to {}",
@@ -87,13 +102,21 @@ async fn planning_loop(
                 .unwrap_or(now.clone())
         );
 
-        let planning_result = optimizer::solve(input_data, now)
-            .inspect_err(|e| error!(error = %e, "Error in solver"))?;
+        let Ok(planning_result) = optimizer::solve(input_data, now)
+            .inspect_err(|e| error!(error = %e, "Error in solver"))
+        else {
+            continue;
+        };
         debug!("Planning result: {:?}", planning_result);
 
         // Write the plan to disk for persistence
-        let file = std::fs::File::create(planning_path())?;
-        serde_json::to_writer_pretty(file, &planning_result)?;
+        let _ = File::create(planning_path())
+            .context("Failed to create planning file")
+            .and_then(|file| {
+                serde_json::to_writer_pretty(file, &planning_result)
+                    .context("Failed to write planning to file")
+            })
+            .inspect_err(|e| error!(error = %e, "Failed to write planning to disk"));
 
         // Update the in memory state
         let _ = app_state

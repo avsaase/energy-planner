@@ -1,3 +1,4 @@
+use anyhow::Context;
 use good_lp::{
     Expression, ProblemVariables, Solution, SolverModel, constraint, default_solver, variable,
 };
@@ -111,7 +112,10 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
 
     // Build and solve the problem
     let formulation = problem.minimise(objective).using(default_solver);
-    let solution = formulation.with_all(constraints).solve()?;
+    let solution = formulation
+        .with_all(constraints)
+        .solve()
+        .context("Failed to solve problem")?;
 
     // Extract solution and build planning
     let mut intervals = Vec::new();

@@ -74,3 +74,9 @@ pub struct PlanningInterval {
     pub solar_production_w: f64,
     pub consumption_w: f64,
 }
+
+pub enum PlanningState {
+    NotPlanned,
+    PlanningInProgress,
+    Planned(Planning),
+}
