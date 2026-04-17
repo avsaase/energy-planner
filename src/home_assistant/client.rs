@@ -48,7 +48,7 @@ impl HaClient {
 
     pub fn get_base_url() -> anyhow::Result<Url> {
         if running_as_addon() {
-            Ok(Url::parse("http://supervisor/core").expect("URL is valid"))
+            Ok(Url::parse("http://supervisor/core/").expect("URL is valid"))
         } else {
             std::env::var("HA_URL")
                 .context("HA_URL environment variable is not set")
