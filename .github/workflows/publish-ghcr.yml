@@ -28,6 +28,8 @@ jobs:
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
 
       - name: Cache Rust Build
         uses: swatinem/rust-cache@v2
@@ -35,15 +37,17 @@ jobs:
       - name: Install Native Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang cmake libclang-dev pkg-config
+          sudo apt-get install -y --no-install-recommends clang cmake libclang-dev musl-tools pkg-config
 
       - name: Build Release Binary
-        run: cargo build --release
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: cargo build --release --target x86_64-unknown-linux-musl
 
       - name: Prepare Docker Build Context Binary
         run: |
           mkdir -p dist
-          cp target/release/energy-planner dist/energy-planner
+          cp target/x86_64-unknown-linux-musl/release/energy-planner dist/energy-planner
           chmod +x dist/energy-planner
 
       - name: Set Up Docker Buildx
