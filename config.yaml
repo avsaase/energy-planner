@@ -8,6 +8,7 @@ arch:
 url: "https://github.com/avsaase/energy-planner"
 ingress: true
 ingress_port: 8099
+homeassistant_api: true
 panel_icon: "mdi:battery-charging"
 panel_title: "Energy Planner"
 image: "ghcr.io/avsaase/{arch}-energy-planner"
