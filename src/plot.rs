@@ -66,6 +66,8 @@ pub fn generate_plot(planning: &Planning) -> String {
                 .map(|interval| interval.grid_import_w)
                 .collect(),
         )
+        .offset(0.1)
+        .width(0.8)
         .name("Grid import")
         .hover_text_array(interval_labels.clone())
         .hover_template(power_hover_template),
@@ -79,6 +81,8 @@ pub fn generate_plot(planning: &Planning) -> String {
                 .map(|interval| -interval.grid_export_w)
                 .collect(),
         )
+        .offset(0.1)
+        .width(0.8)
         .name("Grid export")
         .hover_text_array(interval_labels.clone())
         .hover_template(power_hover_template),
@@ -97,6 +101,8 @@ pub fn generate_plot(planning: &Planning) -> String {
                 .map(|interval| interval.battery_charge_power_w)
                 .collect(),
         )
+        .offset(0.1)
+        .width(0.8)
         .name("Battery charge")
         .hover_text_array(interval_labels.clone())
         .hover_template(power_hover_template),
@@ -110,6 +116,8 @@ pub fn generate_plot(planning: &Planning) -> String {
                 .map(|interval| -interval.battery_discharge_power_w)
                 .collect(),
         )
+        .offset(0.1)
+        .width(0.8)
         .name("Battery discharge")
         .hover_text_array(interval_labels.clone())
         .hover_template(power_hover_template),
@@ -134,7 +142,10 @@ pub fn generate_plot(planning: &Planning) -> String {
         .hover_text_array(soc_labels.clone())
         .hover_template(soc_hover_template),
     );
-    soc_plot.set_layout(base_layout("Battery SOC", "SOC (%)", &soc_labels));
+    soc_plot.set_layout(
+        base_layout("Battery SOC", "SOC (%)", &soc_labels)
+            .y_axis(Axis::new().title("SOC (%)").range(vec![0.0, 100.0])),
+    );
     soc_plot.set_configuration(base_configuration());
     html_sections.push(soc_plot.to_inline_html(Some("planning-plot-battery-soc")));
 
@@ -148,6 +159,8 @@ pub fn generate_plot(planning: &Planning) -> String {
                 .map(|interval| interval.consumption_w)
                 .collect(),
         )
+        .offset(0.1)
+        .width(0.8)
         .name("Consumption")
         .hover_text_array(interval_labels.clone())
         .hover_template(power_hover_template),
@@ -166,6 +179,8 @@ pub fn generate_plot(planning: &Planning) -> String {
                 .map(|interval| interval.solar_production_w)
                 .collect(),
         )
+        .offset(0.1)
+        .width(0.8)
         .name("Solar production")
         .hover_text_array(interval_labels.clone())
         .hover_template(power_hover_template),
@@ -200,7 +215,7 @@ pub fn generate_plot(planning: &Planning) -> String {
 }
 
 fn base_layout(title: &str, y_axis_label: &str, labels: &[String]) -> Layout {
-    let max_x = labels.len().saturating_sub(1) as f64 + 0.5;
+    let max_x = labels.len() as f64;
     let (tick_values, tick_text) = hourly_ticks(labels);
 
     Layout::new()
@@ -211,10 +226,11 @@ fn base_layout(title: &str, y_axis_label: &str, labels: &[String]) -> Layout {
         .x_axis(
             Axis::new()
                 .type_(AxisType::Linear)
+                .show_grid(true)
                 .tick_mode(TickMode::Array)
                 .tick_values(tick_values)
                 .tick_text(tick_text)
-                .range(vec![-0.5, max_x])
+                .range(vec![0.0, max_x])
                 .tick_angle(-45.0),
         )
         .y_axis(Axis::new().title(y_axis_label))
