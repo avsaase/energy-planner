@@ -58,5 +58,6 @@ async fn root(State(app_state): State<AppState>) -> Result<Html<String>, StatusC
 
 async fn start_plan(State(app_state): State<AppState>) -> Redirect {
     app_state.start_plan.notify_one();
-    Redirect::to("/")
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    Redirect::to(".")
 }
