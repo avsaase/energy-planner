@@ -97,6 +97,37 @@
         {% if has_plot %}
         <p class="meta">Generated for {{ interval_count }} intervals.</p>
         {{ plot_html|safe }}
+        <script>
+            (function disablePlotlyZoomPan() {
+                if (!window.Plotly) {
+                    return;
+                }
+
+                const lockInteractions = () => {
+                    const plots = document.querySelectorAll(".js-plotly-plot");
+                    plots.forEach((plot) => {
+                        const updates = { dragmode: false };
+                        const layout = plot.layout || {};
+
+                        Object.keys(layout).forEach((axisKey) => {
+                            if (/^[xy]axis\d*$/.test(axisKey)) {
+                                updates[`${axisKey}.fixedrange`] = true;
+                            }
+                        });
+
+                        if (Object.keys(updates).length === 1) {
+                            updates["xaxis.fixedrange"] = true;
+                            updates["yaxis.fixedrange"] = true;
+                        }
+
+                        window.Plotly.relayout(plot, updates).catch(() => {});
+                    });
+                };
+
+                // Inline plot scripts run during HTML parse; defer one tick to ensure plots exist.
+                window.requestAnimationFrame(lockInteractions);
+            })();
+        </script>
         {% else %}
         <p class="meta">No planning result available yet.</p>
         <div class="empty">The optimizer has not published a planning result yet.</div>
