@@ -42,6 +42,8 @@ jobs:
       - name: Build Release Binary
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
+          CXX_x86_64_unknown_linux_musl: musl-gcc
+          CXX: musl-gcc
         run: cargo build --release --target x86_64-unknown-linux-musl
 
       - name: Prepare Docker Build Context Binary
