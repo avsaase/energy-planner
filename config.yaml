@@ -10,6 +10,7 @@ ingress: true
 ingress_port: 8099
 panel_icon: "mdi:battery-charging"
 panel_title: "Energy Planner"
+image: "ghcr.io/avsaase/{arch}-energy-planner"
 options:
   solar_forecast_entities:
     - "sensor.energy_production_today_2"
