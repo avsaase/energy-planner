@@ -1,7 +1,7 @@
-use crate::types::Planning;
+use crate::types::{BatteryIntent, Planning};
 use plotly::{
     Bar, Configuration, Plot, Scatter,
-    common::{Anchor, Line, LineShape, Mode, Orientation, TickMode},
+    common::{Anchor, Line, LineShape, Marker, Mode, Orientation, TickMode},
     configuration::DisplayModeBar,
     layout::{Axis, AxisType, BarMode, Layout, Legend, Margin},
 };
@@ -30,10 +30,6 @@ pub fn generate_plot(planning: &Planning) -> String {
             )
         })
         .collect();
-    // let mut price_hover_labels = interval_labels.clone();
-    // if let Some(last_label) = interval_labels.last() {
-    //     price_hover_labels.push(last_label.clone());
-    // }
     let mut import_price_step_values: Vec<f64> = planning
         .intervals
         .iter()
@@ -50,11 +46,59 @@ pub fn generate_plot(planning: &Planning) -> String {
     if let Some(last_value) = export_price_step_values.last().copied() {
         export_price_step_values.push(last_value);
     }
+    let mut shadow_price_step_values: Vec<f64> = planning
+        .intervals
+        .iter()
+        .map(|interval| interval.shadow_price_eur_per_kwh)
+        .collect();
+    if let Some(last_value) = shadow_price_step_values.last().copied() {
+        shadow_price_step_values.push(last_value);
+    }
     let power_hover_template = "%{hovertext}: %{y:.0f}W<extra></extra>";
     let soc_hover_template = "%{hovertext}: %{y:.1f}%<extra></extra>";
     let price_hover_template = "%{hovertext}: %{y:.4f} EUR/kWh<extra></extra>";
+    let intent_hover_template = "%{hovertext}<extra></extra>";
+
+    let (intent_labels, intent_colors) = planning
+        .intervals
+        .iter()
+        .zip(interval_labels.iter())
+        .map(|(interval, label)| {
+            (
+                format!("{label}: {}", intent_label(&interval.battery_intent)),
+                intent_color(&interval.battery_intent),
+            )
+        })
+        .unzip();
 
     let mut html_sections = Vec::new();
+
+    let mut intent_plot = Plot::new();
+    intent_plot.add_trace(
+        Bar::new(x_values.clone(), vec![1.0; planning.intervals.len()])
+            .offset(0.1)
+            .width(0.8)
+            .name("Battery intent")
+            .show_legend(false)
+            .marker(Marker::new().color_array(intent_colors))
+            .hover_text_array(intent_labels)
+            .hover_template(intent_hover_template),
+    );
+    intent_plot.set_layout(
+        base_layout("Battery intent", "", &labels)
+            .height(130)
+            .margin(Margin::new().left(72).right(24).top(30).bottom(85))
+            .y_axis(
+                Axis::new()
+                    .range(vec![0.0, 1.0])
+                    .show_grid(false)
+                    .show_tick_labels(false)
+                    .zero_line(false)
+                    .title(""),
+            ),
+    );
+    intent_plot.set_configuration(base_configuration());
+    html_sections.push(intent_plot.to_inline_html(Some("planning-plot-battery-intent")));
 
     let mut grid_plot = Plot::new();
     grid_plot.add_trace(
@@ -98,7 +142,7 @@ pub fn generate_plot(planning: &Planning) -> String {
             planning
                 .intervals
                 .iter()
-                .map(|interval| interval.battery_charge_power_w)
+                .map(|interval| interval.battery_charge_w)
                 .collect(),
         )
         .offset(0.1)
@@ -113,7 +157,7 @@ pub fn generate_plot(planning: &Planning) -> String {
             planning
                 .intervals
                 .iter()
-                .map(|interval| -interval.battery_discharge_power_w)
+                .map(|interval| -interval.battery_discharge_w)
                 .collect(),
         )
         .offset(0.1)
@@ -206,6 +250,14 @@ pub fn generate_plot(planning: &Planning) -> String {
             .hover_text_array(interval_labels.clone())
             .hover_template(price_hover_template),
     );
+    price_plot.add_trace(
+        Scatter::new(x_values.clone(), shadow_price_step_values)
+            .mode(Mode::Lines)
+            .line(Line::new().shape(LineShape::Hv))
+            .name("Shadow price")
+            .hover_text_array(interval_labels.clone())
+            .hover_template(price_hover_template),
+    );
     price_plot.set_layout(base_layout("Electricity price", "EUR/kWh", &labels));
     price_plot.set_configuration(base_configuration());
     html_sections.push(price_plot.to_inline_html(Some("planning-plot-price")));
@@ -263,4 +315,28 @@ fn hourly_ticks(labels: &[String]) -> (Vec<f64>, Vec<String>) {
             }
         })
         .unzip()
+}
+
+fn intent_color(intent: &BatteryIntent) -> &'static str {
+    match intent {
+        BatteryIntent::Idle => "#9ca3af",
+        BatteryIntent::Balance => "#2563eb",
+        BatteryIntent::BalanceChargeOnly => "#06b6d4",
+        BatteryIntent::BalanceDischargeOnly => "#f59e0b",
+        BatteryIntent::FixedCharge { .. } => "#16a34a",
+        BatteryIntent::FixedDischarge { .. } => "#dc2626",
+        BatteryIntent::Other => "#6b7280",
+    }
+}
+
+fn intent_label(intent: &BatteryIntent) -> String {
+    match intent {
+        BatteryIntent::Idle => "Idle".to_string(),
+        BatteryIntent::Balance => "Balance".to_string(),
+        BatteryIntent::BalanceChargeOnly => "Balance charge only".to_string(),
+        BatteryIntent::BalanceDischargeOnly => "Balance discharge only".to_string(),
+        BatteryIntent::FixedCharge { power_w } => format!("Fixed charge: {:.0} W", power_w),
+        BatteryIntent::FixedDischarge { power_w } => format!("Fixed discharge: {:.0} W", power_w),
+        BatteryIntent::Other => "Other".to_string(),
+    }
 }

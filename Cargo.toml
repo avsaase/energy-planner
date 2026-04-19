@@ -8,8 +8,7 @@ anyhow = "1.0.100"
 askama = "0.15.6"
 axum = { version = "0.8.8", features = ["macros"] }
 futures = "0.3.32"
-# good_lp = { version = "1.14.2", default-features = false, features = ["scip", "scip_bundled"] }
-good_lp = { version = "1.14.2", default-features = false, features = ["clarabel"] }
+good_lp = { version = "1.14.2", default-features = false, features = ["highs"] }
 itertools = "0.14.0"
 jiff = { version = "0.2.18", features = ["serde"] }
 reqwest = { version = "0.13.2", features = ["json"] }

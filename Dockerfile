@@ -1,4 +1,4 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/base:latest
+ARG BUILD_FROM=ghcr.io/hassio-addons/debian-base/amd64:latest
 
 FROM ${BUILD_FROM}
 COPY run.sh /run.sh

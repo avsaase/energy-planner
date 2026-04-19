@@ -13,7 +13,7 @@ use energy_planner::{
 };
 use jiff::{RoundMode, Unit, Zoned, ZonedRound};
 use tokio::sync::{Notify, RwLock};
-use tracing::{debug, error, info, level_filters::LevelFilter};
+use tracing::{error, info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -107,7 +107,7 @@ async fn planning_loop(
         else {
             continue;
         };
-        debug!("Planning result: {:?}", planning_result);
+        // debug!("Planning result: {:?}", planning_result);
 
         // Write the plan to disk for persistence
         let _ = File::create(planning_path())

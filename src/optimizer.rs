@@ -1,34 +1,37 @@
 use anyhow::Context;
 use good_lp::{
-    Expression, ProblemVariables, Solution, SolverModel, constraint, default_solver, variable,
+    DualValues, Expression, ProblemVariables, Solution, SolutionWithDual, SolverModel, constraint,
+    default_solver, variable,
 };
 use jiff::{Unit, Zoned};
 
-use crate::types::{InputData, Planning, PlanningInterval};
-
-const CYCLE_COST_PER_WH: f64 = 1200.0 / (6000.0 * 5.12 * 0.9) / 1000.0; // 1200 EUR for 6000 full cycles at 5.12 kWh capacity, converted to EUR/Wh
+use crate::types::{BatteryIntent, InputData, Planning, PlanningInterval};
 
 pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
+    if input_data.intervals.is_empty() {
+        anyhow::bail!("No intervals to plan for");
+    }
+
     let n = input_data.intervals.len();
 
-    let mut problem = ProblemVariables::new();
+    let mut problem_variables = ProblemVariables::new();
 
     // Continuous decision variables for each time interval
-    let battery_charge = problem.add_vector(
+    let battery_charge = problem_variables.add_vector(
         variable()
             .min(0.0)
             .max(input_data.battery_parameters.max_charge_power_w),
         n,
     );
-    let battery_discharge = problem.add_vector(
+    let battery_discharge = problem_variables.add_vector(
         variable()
             .min(0.0)
             .max(input_data.battery_parameters.max_discharge_power_w),
         n,
     );
-    let grid_import = problem.add_vector(variable().min(0.0), n);
-    let grid_export = problem.add_vector(variable().min(0.0), n);
-    let soc = problem.add_vector(
+    let grid_import = problem_variables.add_vector(variable().min(0.0), n);
+    let grid_export = problem_variables.add_vector(variable().min(0.0), n);
+    let soc = problem_variables.add_vector(
         variable()
             .min(input_data.battery_parameters.min_soc_percent)
             .max(input_data.battery_parameters.max_soc_percent),
@@ -47,29 +50,34 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
             * duration_hours;
 
         // Cycle costs for battery usage
-        objective +=
-            (battery_charge[t] + battery_discharge[t]) * CYCLE_COST_PER_WH * duration_hours;
+        objective += (battery_charge[t] + battery_discharge[t])
+            * input_data.battery_parameters.cycle_cost_eur_per_wh()
+            * duration_hours;
     }
 
     // Subtract terminal value of remaining energy in battery (assumed at fixed value)
-    const TERMINAL_VALUE_PER_WH: f64 = 0.22 / 1000.0;
-    objective -= soc[n - 1] * input_data.battery_parameters.capacity_wh * TERMINAL_VALUE_PER_WH;
+    // const TERMINAL_VALUE_PER_WH: f64 = 0.25 / 1000.0;
+    // objective -= soc[n - 1] * input_data.battery_parameters.capacity_wh * TERMINAL_VALUE_PER_WH;
+
+    // Create the problem
+    let mut problem = problem_variables.minimise(objective).using(default_solver);
 
     // Constraints
-    let mut constraints = Vec::new();
+    let mut power_balance_constraints = Vec::new();
 
     for (t, interval) in input_data.intervals.iter().enumerate() {
         let duration_hours = (&interval.end - &interval.start).total(Unit::Hour)?;
 
         // Power balance
-        constraints.push(constraint!(
-            interval.solar_forecast_w + grid_import[t] + battery_discharge[t]
-                == interval.base_load_forecast_w + grid_export[t] + battery_charge[t]
-        ));
+        let pb_constraint = constraint!(
+            interval.base_load_forecast_w + grid_export[t] + battery_charge[t]
+                == interval.solar_forecast_w + grid_import[t] + battery_discharge[t]
+        );
+        power_balance_constraints.push(problem.add_constraint(pb_constraint.clone()));
 
         // SOC evolution
         if t == 0 {
-            constraints.push(constraint!(
+            problem.add_constraint(constraint!(
                 soc[0]
                     == input_data.battery_current_soc_percent
                         + (battery_charge[0]
@@ -82,7 +90,7 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
                             / input_data.battery_parameters.capacity_wh)
             ));
         } else {
-            constraints.push(constraint!(
+            problem.add_constraint(constraint!(
                 soc[t]
                     == soc[t - 1]
                         + (battery_charge[t]
@@ -97,35 +105,53 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
         }
 
         // Battery power limits
-        constraints.push(constraint!(
+        problem.add_constraint(constraint!(
             battery_charge[t] <= input_data.battery_parameters.max_charge_power_w
         ));
-        constraints.push(constraint!(
+        problem.add_constraint(constraint!(
             battery_discharge[t] <= input_data.battery_parameters.max_discharge_power_w
         ));
     }
 
+    // Constraint to avoid always discharging the battery to zero at the end of the horizon
+    problem.add_constraint(constraint!(
+        soc[n - 1] >= input_data.battery_current_soc_percent
+    ));
+
     // Build and solve the problem
-    let formulation = problem.minimise(objective).using(default_solver);
-    let solution = formulation
-        .with_all(constraints)
-        .solve()
-        .context("Failed to solve problem")?;
+    let mut solution = problem.solve().context("Failed to solve problem")?;
+
+    let solution = solution.compute_dual();
 
     // Extract solution and build planning
     let mut intervals = Vec::new();
     for (t, interval) in input_data.intervals.iter().enumerate() {
-        let battery_charge_power_w = solution.value(battery_charge[t]);
-        let battery_discharge_power_w = solution.value(battery_discharge[t]);
+        let duration_hours = (&interval.end - &interval.start).total(Unit::Hour)?;
+
+        let battery_charge_w = solution.value(battery_charge[t]);
+        let battery_discharge_w = solution.value(battery_discharge[t]);
         let grid_import_w = solution.value(grid_import[t]);
         let grid_export_w = solution.value(grid_export[t]);
         let battery_soc_end = solution.value(soc[t]);
 
+        let shadow_price =
+            -solution.dual(power_balance_constraints[t].clone()) / duration_hours * 1000.0; // convert from EUR/W to EUR/kWh
+
+        let battery_intent = determine_intent(
+            grid_import_w,
+            grid_export_w,
+            battery_charge_w,
+            battery_discharge_w,
+            input_data.intervals[t].electricity_price_eur_per_kwh_take,
+            input_data.intervals[t].electricity_price_eur_per_kwh_feed,
+            shadow_price,
+        );
+
         intervals.push(PlanningInterval {
             start: interval.start.clone(),
             end: interval.end.clone(),
-            battery_charge_power_w,
-            battery_discharge_power_w,
+            battery_charge_w,
+            battery_discharge_w,
             battery_soc_end,
             grid_import_w,
             grid_export_w,
@@ -133,6 +159,8 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
             electricity_price_eur_per_kwh_feed: interval.electricity_price_eur_per_kwh_feed,
             solar_production_w: interval.solar_forecast_w,
             consumption_w: interval.base_load_forecast_w,
+            shadow_price_eur_per_kwh: shadow_price,
+            battery_intent,
         });
     }
 
@@ -140,4 +168,71 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
         planned_at: now,
         intervals,
     })
+}
+
+fn determine_intent(
+    grid_import_w: f64,
+    grid_export_w: f64,
+    battery_charge_w: f64,
+    battery_discharge_w: f64,
+    import_price_eur_per_kwh: f64,
+    export_price_eur_per_kwh: f64,
+    shadow_price_eur_per_kwh: f64,
+) -> BatteryIntent {
+    let threshold = 50.0;
+    let price_tolarance = 0.01;
+
+    let is_charging = battery_charge_w > threshold;
+    let is_discharging = battery_discharge_w > threshold;
+    let is_importing = grid_import_w > threshold;
+    let is_exporting = grid_export_w > threshold;
+
+    let solar_surplus = grid_export_w;
+    let consumption_shortage = grid_import_w;
+
+    if is_charging && is_importing && battery_charge_w > solar_surplus + threshold {
+        // Explicitely charging from grid
+        return BatteryIntent::FixedCharge {
+            power_w: battery_charge_w,
+        };
+    }
+
+    if is_discharging && is_exporting && battery_discharge_w > consumption_shortage + threshold {
+        // Explicitely discharging to grid
+        return BatteryIntent::FixedDischarge {
+            power_w: battery_discharge_w,
+        };
+    }
+
+    if !is_charging && !is_discharging {
+        return BatteryIntent::Idle;
+    }
+
+    if shadow_price_eur_per_kwh > import_price_eur_per_kwh - 0.01 {
+        // Shadow price is at import price, so we want
+    }
+
+    let near_import = (shadow_price_eur_per_kwh - import_price_eur_per_kwh).abs() < price_tolarance;
+    let near_export = (shadow_price_eur_per_kwh - export_price_eur_per_kwh).abs() < price_tolarance;
+
+    if near_import {
+        // Grid is marginal source — battery is maxed out on discharge.
+        // Allow discharge to cover consumption, but don't charge
+        // from grid on a surplus (that would cost import price for
+        // energy only worth shadow ≈ import price minus losses).
+        BatteryIntent::BalanceDischargeOnly
+    } else if near_export {
+        // Grid is marginal sink — battery is at boundary.
+        // Allow charge from surplus, but don't discharge
+        // (stored energy only worth export price).
+        BatteryIntent::BalanceChargeOnly
+    } else if shadow_price_eur_per_kwh > export_price_eur_per_kwh
+        && shadow_price_eur_per_kwh < import_price_eur_per_kwh
+    {
+        // Battery is marginal — both directions valuable.
+        BatteryIntent::Balance
+    } else {
+        // Shadow below export price — energy worthless, do nothing.
+        BatteryIntent::Idle
+    }
 }

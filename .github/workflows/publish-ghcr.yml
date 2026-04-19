@@ -18,7 +18,8 @@ jobs:
         include:
           - arch: amd64
             platform: linux/amd64
-            build_from: ghcr.io/home-assistant/amd64-base:3.19
+            build_from: ghcr.io/hassio-addons/debian-base/amd64:9.3.0
+            target: x86_64-unknown-linux-gnu
           # - arch: aarch64
           #   platform: linux/arm64
           #   build_from: ghcr.io/home-assistant/aarch64-base:3.19
@@ -29,7 +30,7 @@ jobs:
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl
+          targets: ${{ matrix.target }}
 
       - name: Cache Rust Build
         uses: swatinem/rust-cache@v2
@@ -40,12 +41,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends musl-tools
 
       - name: Build Release Binary
-        run: cargo build --release --target x86_64-unknown-linux-musl
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare Docker Build Context Binary
         run: |
           mkdir -p dist
-          cp target/x86_64-unknown-linux-musl/release/energy-planner dist/energy-planner
+          cp target/${{ matrix.target }}/release/energy-planner dist/energy-planner
           chmod +x dist/energy-planner
 
       - name: Set Up Docker Buildx

@@ -1,5 +1,5 @@
 name: "Energy Planner"
-version: "0.1.11"
+version: "0.1.12"
 slug: "energy_planner"
 description: "LP-based energy optimization"
 arch:
@@ -20,6 +20,8 @@ options:
   electricity_price_entity: "sensor.frank_energie_prijzen_huidige_elektriciteit_inkoopprijs"
   battery_parameters:
     capacity_wh: 5120
+    lifetime_cycles: 6000
+    purchase_cost_eur: 1200
     max_charge_power_w: 2500
     max_discharge_power_w: 2500
     charge_efficiency: 0.88
@@ -50,6 +52,8 @@ schema:
   electricity_price_entity: str
   battery_parameters:
     capacity_wh: float
+    lifetime_cycles: int
+    purchase_cost_eur: float
     max_charge_power_w: float
     max_discharge_power_w: float
     charge_efficiency: float
