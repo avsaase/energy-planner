@@ -7,7 +7,6 @@ use jiff::{Unit, Zoned};
 use crate::types::{InputData, Planning, PlanningInterval};
 
 const CYCLE_COST_PER_WH: f64 = 1200.0 / (6000.0 * 5.12 * 0.9) / 1000.0; // 1200 EUR for 6000 full cycles at 5.12 kWh capacity, converted to EUR/Wh
-const IMPORT_EXPORT_PENALTY_PER_WH: f64 = 0.05 / 1000.0;
 
 pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
     let n = input_data.intervals.len();
@@ -50,10 +49,6 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
         // Cycle costs for battery usage
         objective +=
             (battery_charge[t] + battery_discharge[t]) * CYCLE_COST_PER_WH * duration_hours;
-
-        // Penalty for grid import/export to encourage self-consumption
-        objective +=
-            (grid_import[t] + grid_export[t]) * IMPORT_EXPORT_PENALTY_PER_WH * duration_hours;
     }
 
     // Subtract terminal value of remaining energy in battery (assumed at fixed value)
