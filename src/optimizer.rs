@@ -145,6 +145,7 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
             input_data.intervals[t].electricity_price_eur_per_kwh_take,
             input_data.intervals[t].electricity_price_eur_per_kwh_feed,
             shadow_price,
+            input_data.battery_parameters.cycle_cost_eur_per_wh() / 1000.0,
         );
 
         intervals.push(PlanningInterval {
@@ -170,6 +171,7 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn determine_intent(
     grid_import_w: f64,
     grid_export_w: f64,
@@ -178,61 +180,29 @@ fn determine_intent(
     import_price_eur_per_kwh: f64,
     export_price_eur_per_kwh: f64,
     shadow_price_eur_per_kwh: f64,
+    cycle_cost_per_kwh: f64,
 ) -> BatteryIntent {
-    let threshold = 50.0;
-    let price_tolarance = 0.01;
+    const FIXED_MIN_W: f64 = 200.0;
+    const ZERO_W: f64 = 10.0;
 
-    let is_charging = battery_charge_w > threshold;
-    let is_discharging = battery_discharge_w > threshold;
-    let is_importing = grid_import_w > threshold;
-    let is_exporting = grid_export_w > threshold;
-
-    let solar_surplus = grid_export_w;
-    let consumption_shortage = grid_import_w;
-
-    if is_charging && is_importing && battery_charge_w > solar_surplus + threshold {
-        // Explicitely charging from grid
+    if battery_charge_w > ZERO_W && grid_import_w > FIXED_MIN_W {
         return BatteryIntent::FixedCharge {
             power_w: battery_charge_w,
         };
     }
-
-    if is_discharging && is_exporting && battery_discharge_w > consumption_shortage + threshold {
-        // Explicitely discharging to grid
+    if battery_discharge_w > ZERO_W && grid_export_w > FIXED_MIN_W {
         return BatteryIntent::FixedDischarge {
             power_w: battery_discharge_w,
         };
     }
 
-    if !is_charging && !is_discharging {
-        return BatteryIntent::Idle;
-    }
+    let charge_ok = shadow_price_eur_per_kwh > export_price_eur_per_kwh + cycle_cost_per_kwh;
+    let discharge_ok = shadow_price_eur_per_kwh < import_price_eur_per_kwh - cycle_cost_per_kwh;
 
-    if shadow_price_eur_per_kwh > import_price_eur_per_kwh - 0.01 {
-        // Shadow price is at import price, so we want
-    }
-
-    let near_import = (shadow_price_eur_per_kwh - import_price_eur_per_kwh).abs() < price_tolarance;
-    let near_export = (shadow_price_eur_per_kwh - export_price_eur_per_kwh).abs() < price_tolarance;
-
-    if near_import {
-        // Grid is marginal source — battery is maxed out on discharge.
-        // Allow discharge to cover consumption, but don't charge
-        // from grid on a surplus (that would cost import price for
-        // energy only worth shadow ≈ import price minus losses).
-        BatteryIntent::BalanceDischargeOnly
-    } else if near_export {
-        // Grid is marginal sink — battery is at boundary.
-        // Allow charge from surplus, but don't discharge
-        // (stored energy only worth export price).
-        BatteryIntent::BalanceChargeOnly
-    } else if shadow_price_eur_per_kwh > export_price_eur_per_kwh
-        && shadow_price_eur_per_kwh < import_price_eur_per_kwh
-    {
-        // Battery is marginal — both directions valuable.
-        BatteryIntent::Balance
-    } else {
-        // Shadow below export price — energy worthless, do nothing.
-        BatteryIntent::Idle
+    match (charge_ok, discharge_ok) {
+        (true, true) => BatteryIntent::Balance,
+        (true, false) => BatteryIntent::BalanceChargeOnly,
+        (false, true) => BatteryIntent::BalanceDischargeOnly,
+        (false, false) => BatteryIntent::Idle,
     }
 }
