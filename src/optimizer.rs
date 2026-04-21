@@ -196,8 +196,15 @@ fn determine_intent(
         };
     }
 
-    let charge_ok = shadow_price_eur_per_kwh > export_price_eur_per_kwh + cycle_cost_per_kwh;
-    let discharge_ok = shadow_price_eur_per_kwh < import_price_eur_per_kwh - cycle_cost_per_kwh;
+    let plan_mixes_charge = battery_charge_w > ZERO_W && grid_import_w > ZERO_W;
+    let plan_mixes_discharge = battery_discharge_w > ZERO_W && grid_export_w > ZERO_W;
+
+    let charge_ok = plan_mixes_charge
+        || plan_mixes_discharge
+        || shadow_price_eur_per_kwh > export_price_eur_per_kwh + cycle_cost_per_kwh;
+    let discharge_ok = plan_mixes_charge
+        || plan_mixes_discharge
+        || shadow_price_eur_per_kwh < import_price_eur_per_kwh - cycle_cost_per_kwh;
 
     match (charge_ok, discharge_ok) {
         (true, true) => BatteryIntent::Balance,
