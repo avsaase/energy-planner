@@ -38,14 +38,13 @@ async fn main() -> anyhow::Result<()> {
         start_plan: Arc::new(Notify::new()),
     };
 
-    if let Ok(x) = File::open(planning_path())
-        .context("Failed to read file")
-        .and_then(|file| {
-            serde_json::from_reader::<_, Planning>(file).context("Failed to parse planning file")
-        })
-    {
+    if let Ok(stored_planning) = read_stored_planning_file().await {
         info!("Loaded existing plan from disk");
-        app_state.current_plan.write().await.replace(x);
+        app_state
+            .current_plan
+            .write()
+            .await
+            .replace(stored_planning);
     } else {
         error!("Failed to read planning from disk, starting with empty plan");
         let _ = remove_file(planning_path());
@@ -55,6 +54,9 @@ async fn main() -> anyhow::Result<()> {
     let plan_task_handle =
         tokio::task::spawn(planning_loop(ha_client, addon_options, app_state.clone()));
 
+    info!("Triggering new plan after restart");
+    app_state.start_plan.notify_one();
+
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8099").await?;
     info!("Serving on http://localhost:8099");
     axum::serve(listener, router(app_state)).await?;
@@ -62,6 +64,12 @@ async fn main() -> anyhow::Result<()> {
     plan_task_handle.await.expect("Task panicked")?;
 
     Ok(())
+}
+
+async fn read_stored_planning_file() -> anyhow::Result<Planning> {
+    let file = File::open(planning_path()).context("Failed to read planning file")?;
+    let planning = serde_json::from_reader(file).context("Failed to parse planning file")?;
+    Ok(planning)
 }
 
 async fn planning_loop(
@@ -94,12 +102,12 @@ async fn planning_loop(
                 .intervals
                 .first()
                 .map(|i| i.start.clone())
-                .unwrap_or(now.clone()),
+                .unwrap_or_default(),
             input_data
                 .intervals
                 .last()
                 .map(|i| i.end.clone())
-                .unwrap_or(now.clone())
+                .unwrap_or_default()
         );
 
         let Ok(planning_result) = optimizer::solve(input_data, now)
