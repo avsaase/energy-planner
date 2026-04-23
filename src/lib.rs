@@ -36,15 +36,6 @@ pub fn planning_path() -> PathBuf {
 }
 
 pub fn interval_iter(start: Zoned, until: Zoned) -> impl Iterator<Item = (Zoned, Zoned)> {
-    // Round the start down to the current minute
-    let start_minute = start
-        .round(
-            ZonedRound::new()
-                .smallest(Unit::Minute)
-                .mode(RoundMode::Floor),
-        )
-        .expect("Rounding down works");
-
     let end_of_first_interval = start
         .round(
             ZonedRound::new()
@@ -56,11 +47,11 @@ pub fn interval_iter(start: Zoned, until: Zoned) -> impl Iterator<Item = (Zoned,
 
     debug!(
         "Interval start: {}, end of first interval: {}, until: {}",
-        start_minute, end_of_first_interval, until
+        start, end_of_first_interval, until
     );
 
     std::iter::successors(
-        Some((start_minute, end_of_first_interval)),
+        Some((start, end_of_first_interval)),
         move |(_, last_end)| {
             let start = last_end;
             let end = start + PLANNING_INTERVAL_MINUTES.minutes();

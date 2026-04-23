@@ -35,21 +35,34 @@
             font-size: 0.95rem;
         }
 
-        .actions {
+        .overview {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #fafafa;
+            padding: 0.9rem;
             margin: 0 0 1rem;
         }
 
-        .notify-btn {
-            border: 1px solid #bbb;
-            border-radius: 6px;
-            background: #f4f4f4;
-            padding: 0.45rem 0.8rem;
-            font-size: 0.9rem;
-            cursor: pointer;
+        .overview-title {
+            margin: 0 0 0.5rem;
+            font-size: 1rem;
         }
 
-        .notify-btn:hover {
-            background: #e9e9e9;
+        .overview-grid {
+            display: grid;
+            gap: 0.35rem 1rem;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .overview-item {
+            margin: 0;
+            font-size: 0.92rem;
+            color: #222;
+        }
+
+        .overview-item strong {
+            color: #555;
+            font-weight: 600;
         }
 
         .empty {
@@ -81,20 +94,28 @@
                 font-size: 0.88rem;
             }
 
-            .notify-btn {
-                width: 100%;
-                padding: 0.6rem 0.8rem;
+            .overview-grid {
+                grid-template-columns: 1fr;
             }
+
         }
     </style>
 </head>
 <body>
     <main>
         <h1>Energy Planning</h1>
-        <form class="actions" method="post" action="start-plan">
-            <button class="notify-btn" type="submit">Start new planning</button>
-        </form>
         {% if has_plot %}
+        <section class="overview" aria-label="Planning overview">
+            <h2 class="overview-title">Overview</h2>
+            <div class="overview-grid">
+                <p class="overview-item"><strong>Last planning time:</strong> {{ planned_at }}</p>
+                <p class="overview-item"><strong>Interval:</strong> {{ first_interval_start }} - {{ first_interval_end }}</p>
+                <p class="overview-item"><strong>Grid:</strong> {{ "{:.0}"|format(first_interval_grid_w) }} W</p>
+                <p class="overview-item"><strong>Battery:</strong> {{ "{:.0}"|format(first_interval_battery_w) }} W</p>
+                <p class="overview-item"><strong>Solar:</strong> {{ "{:.0}"|format(first_interval_solar_w) }} W</p>
+                <p class="overview-item"><strong>Consumption:</strong> {{ "{:.0}"|format(first_interval_consumption_w) }} W</p>
+            </div>
+        </section>
         <p class="meta">Generated for {{ interval_count }} intervals.</p>
         {{ plot_html|safe }}
         <script>
