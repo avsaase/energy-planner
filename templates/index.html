@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Energy Planner</title>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
     <script src="https://cdn.plot.ly/plotly-3.0.1.min.js"></script>
     <style>
         :root {
@@ -104,22 +106,33 @@
 <body>
     <main>
         <h1>Energy Planning</h1>
-        {% if has_plot %}
-        <section class="overview" aria-label="Planning overview">
-            <h2 class="overview-title">Overview</h2>
-            <div class="overview-grid">
-                <p class="overview-item"><strong>Last planning time:</strong> {{ planned_at }}</p>
-                <p class="overview-item"><strong>Interval:</strong> {{ first_interval_start }} - {{ first_interval_end }}</p>
-                <p class="overview-item"><strong>Grid:</strong> {{ "{:.0}"|format(first_interval_grid_w) }} W</p>
-                <p class="overview-item"><strong>Battery:</strong> {{ "{:.0}"|format(first_interval_battery_w) }} W</p>
-                <p class="overview-item"><strong>Solar:</strong> {{ "{:.0}"|format(first_interval_solar_w) }} W</p>
-                <p class="overview-item"><strong>Consumption:</strong> {{ "{:.0}"|format(first_interval_consumption_w) }} W</p>
-            </div>
-        </section>
-        <p class="meta">Generated for {{ interval_count }} intervals.</p>
-        {{ plot_html|safe }}
+        <div
+            id="planning-overview-live"
+            hx-ext="sse"
+            sse-connect="/events/planning"
+            hx-get="/plan-overview-content"
+            hx-trigger="sse:plan-update"
+            hx-swap="innerHTML"
+        >
+            {{ plan_overview_content_html|safe }}
+        </div>
+        <div id="planning-plot-live">{{ plot_content_html|safe }}</div>
         <script>
-            (function disablePlotlyZoomPan() {
+            let preservedScrollY = null;
+
+            function executeInlineScripts(container) {
+                const scripts = container.querySelectorAll("script");
+                scripts.forEach((oldScript) => {
+                    const newScript = document.createElement("script");
+                    if (oldScript.src) {
+                        newScript.src = oldScript.src;
+                    }
+                    newScript.text = oldScript.text;
+                    oldScript.replaceWith(newScript);
+                });
+            }
+
+            function disablePlotlyZoomPan() {
                 if (!window.Plotly) {
                     return;
                 }
@@ -147,12 +160,58 @@
 
                 // Inline plot scripts run during HTML parse; defer one tick to ensure plots exist.
                 window.requestAnimationFrame(lockInteractions);
-            })();
+            }
+
+            disablePlotlyZoomPan();
+
+            function restoreScrollPosition(scrollY) {
+                if (typeof scrollY !== "number") {
+                    return;
+                }
+
+                window.scrollTo(window.scrollX, scrollY);
+                // Plotly redraw can shift layout one frame later.
+                window.requestAnimationFrame(() => window.scrollTo(window.scrollX, scrollY));
+            }
+
+            async function refreshPlotContent(scrollY) {
+                const plotContainer = document.getElementById("planning-plot-live");
+                if (!plotContainer) {
+                    return;
+                }
+
+                try {
+                    const response = await fetch("/plot-content", { cache: "no-store" });
+                    if (!response.ok) {
+                        return;
+                    }
+
+                    const html = await response.text();
+                    plotContainer.innerHTML = html;
+                    executeInlineScripts(plotContainer);
+                    disablePlotlyZoomPan();
+                    restoreScrollPosition(scrollY);
+                } catch (_) {
+                    // Keep showing the last successful plot when refresh fails.
+                }
+            }
+
+            document.body.addEventListener("htmx:beforeSwap", function (event) {
+                if (event.target && event.target.id === "planning-overview-live") {
+                    preservedScrollY = window.scrollY;
+                }
+            });
+
+            // HTMX updates overview content; refresh the plot separately to avoid HTMX swapping Plotly markup.
+            document.body.addEventListener("htmx:afterSwap", async function (event) {
+                if (event.target && event.target.id === "planning-overview-live") {
+                    const currentScrollY = preservedScrollY ?? window.scrollY;
+                    await refreshPlotContent(currentScrollY);
+                    restoreScrollPosition(currentScrollY);
+                    preservedScrollY = null;
+                }
+            });
         </script>
-        {% else %}
-        <p class="meta">No planning result available yet.</p>
-        <div class="empty">The optimizer has not published a planning result yet.</div>
-        {% endif %}
     </main>
 </body>
 </html>
