@@ -36,7 +36,6 @@ async fn main() -> anyhow::Result<()> {
     let app_state = AppState {
         current_plan: Arc::new(RwLock::new(None)),
         start_plan: Arc::new(Notify::new()),
-        plan_updated: Arc::new(Notify::new()),
     };
 
     if let Ok(stored_planning) = read_stored_planning_file().await {
@@ -133,8 +132,6 @@ async fn planning_loop(
             .write()
             .await
             .replace(planning_result);
-
-        app_state.plan_updated.notify_waiters();
     }
 }
 
