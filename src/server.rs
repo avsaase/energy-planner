@@ -1,11 +1,8 @@
 use std::sync::Arc;
 
 use askama::Template;
-use axum::{
-    Json, Router, extract::State, http::StatusCode, response::Html, routing::get,
-};
+use axum::{Router, extract::State, http::StatusCode, response::Html, routing::get};
 use jiff::Unit;
-use serde::Serialize;
 use tokio::sync::{Notify, RwLock};
 
 use crate::{plot::generate_plot, types::Planning};
@@ -17,24 +14,7 @@ pub struct AppState {
 }
 
 pub fn router(app_state: AppState) -> Router {
-    Router::new()
-        .route("/", get(root))
-        .route("/latest-plan", get(latest_plan))
-        .with_state(app_state)
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct PlanningSnapshot {
-    has_plot: bool,
-    plot_html: String,
-    interval_count: usize,
-    planned_at: String,
-    first_interval_start: String,
-    first_interval_end: String,
-    first_interval_grid_w: f64,
-    first_interval_battery_w: f64,
-    first_interval_solar_w: f64,
-    first_interval_consumption_w: f64,
+    Router::new().route("/", get(root)).with_state(app_state)
 }
 
 #[derive(Template)]

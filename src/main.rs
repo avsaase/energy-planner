@@ -1,7 +1,7 @@
 use std::{
     fs::{File, remove_file},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::Context;
@@ -89,15 +89,17 @@ async fn planning_loop(
 
         let now = Zoned::now();
 
+        let start = Instant::now();
         let Ok(input_data) = prepare_optimizer_input(now.clone(), &ha_client, &addon_options)
             .await
             .inspect_err(|e| error!(error = %e, "Error preparing planning input"))
         else {
             continue;
         };
+        let elapsed = start.elapsed();
 
         info!(
-            "Prepared optimizer input data from {} to {}",
+            "Prepared optimizer input data from {} to {} in {} ms",
             input_data
                 .intervals
                 .first()
@@ -107,15 +109,22 @@ async fn planning_loop(
                 .intervals
                 .last()
                 .map(|i| i.end.clone())
-                .unwrap_or_default()
+                .unwrap_or_default(),
+            elapsed.as_millis()
         );
 
-        let Ok(planning_result) = optimizer::solve(input_data, now)
+        let start = Instant::now();
+        let Ok(planning_result) = optimizer::solve(input_data, now.clone())
             .inspect_err(|e| error!(error = %e, "Error in solver"))
         else {
             continue;
         };
-        // debug!("Planning result: {:?}", planning_result);
+
+        info!(
+            "Completed planning for {} intervals in {} ms",
+            planning_result.intervals.len(),
+            start.elapsed().as_millis()
+        );
 
         // Write the plan to disk for persistence
         let _ = File::create(planning_path())
