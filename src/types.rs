@@ -81,7 +81,6 @@ pub struct PlanningInterval {
     pub electricity_price_eur_per_kwh_feed: f64,
     pub solar_production_w: f64,
     pub consumption_w: f64,
-    pub shadow_price_eur_per_kwh: f64,
     pub battery_intent: BatteryIntent,
 }
 

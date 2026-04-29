@@ -46,14 +46,7 @@ pub fn generate_plot(planning: &Planning) -> String {
     if let Some(last_value) = export_price_step_values.last().copied() {
         export_price_step_values.push(last_value);
     }
-    let mut shadow_price_step_values: Vec<f64> = planning
-        .intervals
-        .iter()
-        .map(|interval| interval.shadow_price_eur_per_kwh)
-        .collect();
-    if let Some(last_value) = shadow_price_step_values.last().copied() {
-        shadow_price_step_values.push(last_value);
-    }
+
     let power_hover_template = "%{hovertext}: %{y:.0f}W<extra></extra>";
     let soc_hover_template = "%{hovertext}: %{y:.1f}%<extra></extra>";
     let price_hover_template = "%{hovertext}: %{y:.4f} EUR/kWh<extra></extra>";
@@ -250,14 +243,7 @@ pub fn generate_plot(planning: &Planning) -> String {
             .hover_text_array(interval_labels.clone())
             .hover_template(price_hover_template),
     );
-    price_plot.add_trace(
-        Scatter::new(x_values.clone(), shadow_price_step_values)
-            .mode(Mode::Lines)
-            .line(Line::new().shape(LineShape::Hv))
-            .name("Shadow price")
-            .hover_text_array(interval_labels.clone())
-            .hover_template(price_hover_template),
-    );
+
     price_plot.set_layout(base_layout("Electricity price", "EUR/kWh", &labels));
     price_plot.set_configuration(base_configuration());
     html_sections.push(price_plot.to_inline_html(Some("planning-plot-price")));
