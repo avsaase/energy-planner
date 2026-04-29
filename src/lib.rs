@@ -1,9 +1,12 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Context;
+use derive_more::Deref;
 use itertools::Itertools;
 use jiff::{RoundMode, ToSpan, Unit, Zoned, ZonedRound};
-use tracing::debug;
+use tokio::sync::{Notify, RwLock};
+use tracing::{debug, level_filters::LevelFilter};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
     home_assistant::{
@@ -11,7 +14,8 @@ use crate::{
         client::HaClient,
     },
     types::{
-        ElectricityPrice, ElectricityPriceParameters, InputData, InputInterval, SolarForecast,
+        ElectricityPrice, ElectricityPriceParameters, ElectricityPrices, InputData, InputInterval,
+        Planning, SolarForecast, SolarForecasts,
     },
 };
 
@@ -22,6 +26,39 @@ pub mod server;
 pub mod types;
 
 pub const PLANNING_INTERVAL_MINUTES: i64 = 15;
+
+#[derive(Clone, Deref)]
+pub struct AppState {
+    #[deref]
+    pub state: Arc<RwLock<InnerState>>,
+    pub start_plan: Arc<Notify>,
+}
+
+#[derive(Default)]
+pub struct InnerState {
+    pub current_plan: Option<Planning>,
+    pub electricty_prices: Option<ElectricityPrices>,
+    pub solar_forecast: Option<SolarForecasts>,
+}
+
+impl AppState {
+    pub fn new() -> Self {
+        Self {
+            state: Arc::new(RwLock::new(InnerState::default())),
+            start_plan: Arc::new(Notify::new()),
+        }
+    }
+}
+
+pub fn init_tracing() {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().pretty())
+        .with(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(LevelFilter::INFO.into()),
+        )
+        .init();
+}
 
 pub fn data_dir() -> PathBuf {
     if running_as_addon() {
@@ -74,6 +111,7 @@ pub async fn prepare_optimizer_input(
         .get_solar_forecast(&addon_options.solar_forecast_entities)
         .await?;
     let solar_forecast_end = solar_forecasts
+        .forecasts
         .last()
         .map(|forecast| &forecast.end)
         .context("No solar forecasts available")?;
@@ -83,6 +121,7 @@ pub async fn prepare_optimizer_input(
         .get_electricity_prices(&addon_options.electricity_price_entity)
         .await?;
     let electricity_price_end = electricty_prices
+        .prices
         .last()
         .map(|price| &price.end)
         .context("No electricity prices available")?;
@@ -94,13 +133,13 @@ pub async fn prepare_optimizer_input(
         .filter_map(|(start, end)| {
             let consumption = lookup_consumption(&start, &end, &addon_options.consumption_profile)?;
 
-            let solar_forecast = lookup_solar_forecast(&start, &end, &solar_forecasts)?;
+            let solar_forecast = lookup_solar_forecast(&start, &end, &solar_forecasts.forecasts)?;
 
             let (electricity_price_eur_per_kwh_take, electricity_price_eur_per_kwh_feed) =
                 lookup_electricity_price(
                     &start,
                     &end,
-                    &electricty_prices,
+                    &electricty_prices.prices,
                     addon_options.electricity_price_parameters,
                 )?;
 

@@ -1,17 +1,8 @@
-use std::sync::Arc;
-
 use askama::Template;
 use axum::{Router, extract::State, http::StatusCode, response::Html, routing::get};
 use jiff::Unit;
-use tokio::sync::{Notify, RwLock};
 
-use crate::{plot::generate_plot, types::Planning};
-
-#[derive(Debug, Clone)]
-pub struct AppState {
-    pub current_plan: Arc<RwLock<Option<Planning>>>,
-    pub start_plan: Arc<Notify>,
-}
+use crate::{AppState, plot::generate_plot};
 
 pub fn router(app_state: AppState) -> Router {
     Router::new().route("/", get(root)).with_state(app_state)
@@ -34,7 +25,7 @@ struct IndexTemplate {
 }
 
 async fn root(State(app_state): State<AppState>) -> Result<Html<String>, StatusCode> {
-    let planning = app_state.current_plan.read().await.clone();
+    let planning = app_state.state.read().await.current_plan.clone();
 
     let template = if let Some(planning) = planning {
         let first_interval = planning.intervals.first();

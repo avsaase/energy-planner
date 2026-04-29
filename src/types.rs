@@ -1,11 +1,17 @@
 use jiff::Zoned;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SolarForecast {
     pub start: Zoned,
     pub end: Zoned,
     pub forecast_w: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SolarForecasts {
+    pub updated_at: Zoned,
+    pub forecasts: Vec<SolarForecast>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,6 +22,12 @@ pub struct ElectricityPrice {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElectricityPrices {
+    pub updated_at: Zoned,
+    pub prices: Vec<ElectricityPrice>,
+}
+
+#[derive(Debug, Clone)]
 pub struct InputData {
     pub battery_parameters: BatteryParameters,
     pub intervals: Vec<InputInterval>,
@@ -58,7 +70,8 @@ pub struct BatteryParameters {
 
 impl BatteryParameters {
     pub fn cycle_cost_eur_per_wh(&self) -> f64 {
-        self.purchase_cost_eur / (self.capacity_wh * self.lifetime_cycles as f64)
+        // Divide by 2 to get price per Wh charged or discharged
+        self.purchase_cost_eur / (self.capacity_wh * self.lifetime_cycles as f64) / 2.0
     }
 }
 

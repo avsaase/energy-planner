@@ -1,30 +1,22 @@
 use std::{
     fs::{File, remove_file},
-    sync::Arc,
     time::{Duration, Instant},
 };
 
 use anyhow::Context;
 use energy_planner::{
+    AppState,
     home_assistant::{addon::AddonOptions, client::HaClient},
-    optimizer, planning_path, prepare_optimizer_input,
-    server::{AppState, router},
+    init_tracing, optimizer, planning_path, prepare_optimizer_input,
+    server::router,
     types::Planning,
 };
 use jiff::{RoundMode, Unit, Zoned, ZonedRound};
-use tokio::sync::{Notify, RwLock};
-use tracing::{error, info, level_filters::LevelFilter};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().pretty())
-        .with(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(LevelFilter::INFO.into()),
-        )
-        .init();
+    init_tracing();
 
     info!("Starting energy planner");
 
@@ -33,17 +25,14 @@ async fn main() -> anyhow::Result<()> {
 
     let ha_client = HaClient::new()?;
 
-    let app_state = AppState {
-        current_plan: Arc::new(RwLock::new(None)),
-        start_plan: Arc::new(Notify::new()),
-    };
+    let app_state = AppState::new();
 
     if let Ok(stored_planning) = read_stored_planning_file().await {
         info!("Loaded existing plan from disk");
         app_state
-            .current_plan
             .write()
             .await
+            .current_plan
             .replace(stored_planning);
     } else {
         error!("Failed to read planning from disk, starting with empty plan");
@@ -137,9 +126,9 @@ async fn planning_loop(
 
         // Update the in memory state
         let _ = app_state
-            .current_plan
             .write()
             .await
+            .current_plan
             .replace(planning_result);
     }
 }

@@ -1,25 +1,24 @@
 use std::collections::HashMap;
 
-use anyhow::{Context, bail};
-use futures::{SinkExt, StreamExt, future::try_join_all};
+use anyhow::Context;
+use futures::future::try_join_all;
 use itertools::Itertools;
-use jiff::{Timestamp, ToSpan, tz::TimeZone};
+use jiff::{Timestamp, ToSpan, Zoned, tz::TimeZone};
 use reqwest::Url;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
-use tokio_tungstenite::tungstenite::Message;
 
 use crate::{
     PLANNING_INTERVAL_MINUTES,
-    home_assistant::addon::running_as_addon,
-    types::{ElectricityPrice, SolarForecast},
+    home_assistant::{addon::running_as_addon, types::EntityState},
+    types::{ElectricityPrice, ElectricityPrices, SolarForecast, SolarForecasts},
 };
 
 #[derive(Debug, Clone)]
 pub struct HaClient {
-    http_client: reqwest::Client,
-    base_url: Url,
-    token: SecretString,
+    pub(super) http_client: reqwest::Client,
+    pub(super) base_url: Url,
+    pub(super) token: SecretString,
 }
 
 impl HaClient {
@@ -37,7 +36,7 @@ impl HaClient {
         }
     }
 
-    pub fn get_token() -> anyhow::Result<SecretString> {
+    fn get_token() -> anyhow::Result<SecretString> {
         match std::env::var("SUPERVISOR_TOKEN") {
             Ok(token) => Ok(token.into()),
             Err(_) => std::env::var("HA_TOKEN")
@@ -46,7 +45,7 @@ impl HaClient {
         }
     }
 
-    pub fn get_base_url() -> anyhow::Result<Url> {
+    fn get_base_url() -> anyhow::Result<Url> {
         if running_as_addon() {
             Ok(Url::parse("http://supervisor/core/").expect("URL is valid"))
         } else {
@@ -57,9 +56,8 @@ impl HaClient {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn get_entity_state<S, A>(&self, entity_id: &str) -> anyhow::Result<EntityState<S, A>>
+    async fn get_entity_state<A>(&self, entity_id: &str) -> anyhow::Result<EntityState<A>>
     where
-        S: for<'de> Deserialize<'de>,
         A: for<'de> Deserialize<'de>,
     {
         let url = self.base_url.join(&format!("api/states/{}", entity_id))?;
@@ -70,7 +68,7 @@ impl HaClient {
             .send()
             .await?
             .error_for_status()?
-            .json::<EntityState<S, A>>()
+            .json::<EntityState<A>>()
             .await?;
 
         Ok(state)
@@ -80,18 +78,19 @@ impl HaClient {
     pub async fn get_solar_forecast(
         &self,
         entity_ids: &[String],
-    ) -> anyhow::Result<Vec<SolarForecast>> {
+    ) -> anyhow::Result<SolarForecasts> {
         #[derive(Debug, Deserialize)]
         struct SolarForecastAttributes {
             #[serde(deserialize_with = "deserialize_map_as_vec")]
             pub watts: Vec<(Timestamp, f64)>,
         }
 
-        let states =
-            try_join_all(entity_ids.iter().map(|entity_id| {
-                self.get_entity_state::<String, SolarForecastAttributes>(entity_id)
-            }))
-            .await?;
+        let states = try_join_all(
+            entity_ids
+                .iter()
+                .map(|entity_id| self.get_entity_state::<SolarForecastAttributes>(entity_id)),
+        )
+        .await?;
 
         let forecasts = states
             .into_iter()
@@ -109,14 +108,17 @@ impl HaClient {
             })
             .collect();
 
-        Ok(forecasts)
+        Ok(SolarForecasts {
+            updated_at: Zoned::now(),
+            forecasts: forecasts,
+        })
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn get_electricity_prices(
         &self,
         entity_id: &str,
-    ) -> anyhow::Result<Vec<ElectricityPrice>> {
+    ) -> anyhow::Result<ElectricityPrices> {
         #[derive(Debug, Deserialize)]
         struct ElectrictyPriceAttributes {
             prices: Vec<ElectricityPriceEntry>,
@@ -130,7 +132,7 @@ impl HaClient {
         }
 
         let state = self
-            .get_entity_state::<String, ElectrictyPriceAttributes>(entity_id)
+            .get_entity_state::<ElectrictyPriceAttributes>(entity_id)
             .await?;
 
         let prices = state
@@ -145,97 +147,11 @@ impl HaClient {
             .sorted_by_key(|price| price.start.clone())
             .collect();
 
-        Ok(prices)
+        Ok(ElectricityPrices {
+            updated_at: Zoned::now(),
+            prices,
+        })
     }
-
-    #[tracing::instrument(skip(self))]
-    #[expect(unused)]
-    async fn get_long_term_statistics(
-        &self,
-        start: Timestamp,
-        end: Timestamp,
-        entity_id: &str,
-    ) -> anyhow::Result<serde_json::Value> {
-        let ws_url = self
-            .base_url
-            .as_str()
-            .replace("http://", "ws://")
-            .replace("https://", "wss://");
-        let ws_url = format!("{ws_url}/api/websocket");
-
-        let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url).await?;
-
-        // Step 1: Receive auth_required
-        ws.next()
-            .await
-            .ok_or(anyhow::anyhow!("connection closed"))??;
-
-        // Step 2: Authenticate
-        ws.send(Message::text(
-            serde_json::json!({
-                "type": "auth",
-                "access_token": self.token.expose_secret()
-            })
-            .to_string(),
-        ))
-        .await?;
-
-        // Step 3: Receive auth_ok
-        let auth_response = ws
-            .next()
-            .await
-            .ok_or(anyhow::anyhow!("connection closed"))??;
-        let auth_msg: serde_json::Value = serde_json::from_str(auth_response.to_text()?)?;
-        if auth_msg["type"] != "auth_ok" {
-            anyhow::bail!("authentication failed: {}", auth_msg);
-        }
-
-        // Step 4: Request statistics
-        ws.send(Message::text(
-            serde_json::json!({
-                "id": 1,
-                "type": "recorder/statistics_during_period",
-                "start_time": start,
-                "end_time": end,
-                "statistic_ids": [entity_id],
-                "period": "hour",
-            })
-            .to_string(),
-        ))
-        .await?;
-
-        // Step 5: Receive result
-        #[derive(Deserialize)]
-        struct WsResponse {
-            #[allow(unused)]
-            id: u64,
-            result: Option<serde_json::Value>,
-            success: Option<bool>,
-        }
-
-        let response = ws
-            .next()
-            .await
-            .ok_or(anyhow::anyhow!("connection closed"))??;
-        let parsed: WsResponse = serde_json::from_str(response.to_text()?)?;
-
-        if parsed.success != Some(true) {
-            bail!("statistics request failed: {:?}", parsed.result);
-        }
-
-        ws.close(None).await?;
-
-        parsed
-            .result
-            .ok_or(anyhow::anyhow!("no result in response"))
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[expect(unused)]
-pub struct EntityState<S, A> {
-    state: S,
-    attributes: A,
 }
 
 fn deserialize_map_as_vec<'de, D>(deserializer: D) -> Result<Vec<(Timestamp, f64)>, D::Error>
