@@ -171,7 +171,7 @@ fn determine_intent(
     battery_charge_w: f64,
     battery_discharge_w: f64,
 ) -> BatteryIntent {
-    const ZERO_W: f64 = 10.0;
+    const ZERO_W: f64 = 1.0;
 
     let is_charging = battery_charge_w > ZERO_W;
     let is_dicharging = battery_discharge_w > ZERO_W;
@@ -180,6 +180,14 @@ fn determine_intent(
 
     if !is_charging && !is_dicharging {
         return BatteryIntent::Idle;
+    }
+
+    if is_charging && is_exporting {
+        return BatteryIntent::BalanceChargeOnly;
+    }
+
+    if is_dicharging && is_importing {
+        return BatteryIntent::BalanceDischargeOnly;
     }
 
     if is_charging && is_importing {
