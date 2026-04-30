@@ -8,14 +8,14 @@ pub struct SolarForecast {
     pub forecast_w: f64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElectricityPrice {
     pub start: Zoned,
     pub end: Zoned,
     pub price_per_kwh: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputData {
     pub battery_parameters: BatteryParameters,
     pub intervals: Vec<InputInterval>,
@@ -23,7 +23,7 @@ pub struct InputData {
     pub battery_current_soc_percent: f64,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ElectricityPriceParameters {
     pub supplier_cost_import_eur_per_kwh: f64,
     pub supplier_cost_export_eur_per_kwh: f64,
@@ -33,7 +33,7 @@ pub struct ElectricityPriceParameters {
     pub vat_export: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputInterval {
     pub start: Zoned,
     pub end: Zoned,
@@ -43,7 +43,7 @@ pub struct InputInterval {
     pub electricity_price_eur_per_kwh_feed: f64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatteryParameters {
     pub capacity_wh: f64,
     pub lifetime_cycles: u64,

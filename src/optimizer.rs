@@ -1,7 +1,6 @@
 use anyhow::Context;
 use good_lp::{
-    Expression, ProblemVariables, Solution, SolutionWithDual, SolverModel, constraint,
-    default_solver, variable,
+    Expression, ProblemVariables, Solution, SolverModel, constraint, default_solver, variable,
 };
 use jiff::{Unit, Zoned};
 
@@ -31,6 +30,7 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
     );
     let grid_import = problem_variables.add_vector(variable().min(0.0), n);
     let grid_export = problem_variables.add_vector(variable().min(0.0), n);
+    let battery_charge_active = problem_variables.add_vector(variable().binary(), n);
     let soc = problem_variables.add_vector(
         variable()
             .min(input_data.battery_parameters.min_soc_percent)
@@ -55,25 +55,19 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
             * duration_hours;
     }
 
-    // Subtract terminal value of remaining energy in battery (assumed at fixed value)
-    // const TERMINAL_VALUE_PER_WH: f64 = 0.25 / 1000.0;
-    // objective -= soc[n - 1] * input_data.battery_parameters.capacity_wh * TERMINAL_VALUE_PER_WH;
-
     // Create the problem
     let mut problem = problem_variables.minimise(objective).using(default_solver);
 
     // Constraints
-    let mut power_balance_constraints = Vec::new();
 
     for (t, interval) in input_data.intervals.iter().enumerate() {
         let duration_hours = (&interval.end - &interval.start).total(Unit::Hour)?;
 
         // Power balance
-        let pb_constraint = constraint!(
+        problem.add_constraint(constraint!(
             interval.base_load_forecast_w + grid_export[t] + battery_charge[t]
                 == interval.solar_forecast_w + grid_import[t] + battery_discharge[t]
-        );
-        power_balance_constraints.push(problem.add_constraint(pb_constraint.clone()));
+        ));
 
         // SOC evolution
         if t == 0 {
@@ -111,6 +105,17 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
         problem.add_constraint(constraint!(
             battery_discharge[t] <= input_data.battery_parameters.max_discharge_power_w
         ));
+
+        // Prevent simultaneous battery charging and discharging.
+        problem.add_constraint(constraint!(
+            battery_charge[t]
+                <= input_data.battery_parameters.max_charge_power_w * battery_charge_active[t]
+        ));
+        problem.add_constraint(constraint!(
+            battery_discharge[t]
+                <= input_data.battery_parameters.max_discharge_power_w
+                    * (1.0 - battery_charge_active[t])
+        ));
     }
 
     // Constraint to avoid always discharging the battery to zero at the end of the horizon
@@ -119,9 +124,7 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
     ));
 
     // Build and solve the problem
-    let mut solution = problem.solve().context("Failed to solve problem")?;
-
-    let solution = solution.compute_dual();
+    let solution = problem.solve().context("Failed to solve problem")?;
 
     // Extract solution and build planning
     let mut intervals = Vec::new();
