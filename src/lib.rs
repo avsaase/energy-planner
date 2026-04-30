@@ -188,6 +188,6 @@ fn calculate_effective_export_price_per_kwh(
     base_price: f64,
     parameters: ElectricityPriceParameters,
 ) -> f64 {
-    (base_price - parameters.energy_tax_export_eur_per_kwh) * (1.0 - parameters.vat_export)
+    (base_price - parameters.energy_tax_export_eur_per_kwh) * (1.0 + parameters.vat_export)
         - parameters.supplier_cost_export_eur_per_kwh
 }
