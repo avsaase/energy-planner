@@ -15,6 +15,13 @@ pub struct SolarForecasts {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConsumptionForecast {
+    pub start: Zoned,
+    pub end: Zoned,
+    pub forecast_w: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElectricityPrice {
     pub start: Zoned,
     pub end: Zoned,

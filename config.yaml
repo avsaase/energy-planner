@@ -36,16 +36,7 @@ options:
     vat_import: 0.21
     vat_export: 0.0
   grid_limit_w: 10000
-  consumption_profile:
-    - start: "00:00"
-      end: "06:00"
-      load_w: 200
-    - start: "06:00"
-      end: "17:00"
-      load_w: 300
-    - start: "17:00"
-      end: "00:00"
-      load_w: 450
+  current_gross_consumption_power_entity: "sensor.gross_power_consumption"
 schema:
   solar_forecast_entities:
     - str
@@ -68,7 +59,4 @@ schema:
     vat_import: float
     vat_export: float
   grid_limit_w: float
-  consumption_profile:
-    - start: str
-      end: str
-      load_w: float
+  current_gross_consumption_power_entity: str

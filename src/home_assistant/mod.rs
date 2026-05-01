@@ -1,4 +1,4 @@
 pub mod addon;
 pub mod client;
-mod types;
+pub mod types;
 mod web_socket;

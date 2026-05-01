@@ -1,24 +1,25 @@
 use std::{path::PathBuf, sync::Arc};
 
-use anyhow::Context;
 use derive_more::Deref;
 use itertools::Itertools;
 use jiff::{RoundMode, ToSpan, Unit, Zoned, ZonedRound};
 use tokio::sync::{Notify, RwLock};
-use tracing::{debug, level_filters::LevelFilter};
+use tracing::{debug, info, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
+    consumption_forecast::{PowerReading, forecast, train},
     home_assistant::{
-        addon::{AddonOptions, ConsumptionProfileEntry, running_as_addon},
+        addon::{AddonOptions, running_as_addon},
         client::HaClient,
     },
     types::{
-        ElectricityPrice, ElectricityPriceParameters, ElectricityPrices, InputData, InputInterval,
-        Planning, SolarForecast, SolarForecasts,
+        ConsumptionForecast, ElectricityPrice, ElectricityPriceParameters, ElectricityPrices,
+        InputData, InputInterval, Planning, SolarForecast, SolarForecasts,
     },
 };
 
+pub mod consumption_forecast;
 pub mod home_assistant;
 pub mod optimizer;
 pub mod plot;
@@ -110,28 +111,23 @@ pub async fn prepare_optimizer_input(
     let solar_forecasts = ha_client
         .get_solar_forecast(&addon_options.solar_forecast_entities)
         .await?;
-    let solar_forecast_end = solar_forecasts
-        .forecasts
-        .last()
-        .map(|forecast| &forecast.end)
-        .context("No solar forecasts available")?;
-    debug!("Solar forecast end: {}", solar_forecast_end);
 
     let electricty_prices = ha_client
         .get_electricity_prices(&addon_options.electricity_price_entity)
         .await?;
-    let electricity_price_end = electricty_prices
-        .prices
-        .last()
-        .map(|price| &price.end)
-        .context("No electricity prices available")?;
-    debug!("Electricity price end: {}", electricity_price_end);
 
-    let data_end = solar_forecast_end.min(electricity_price_end);
+    let consumption_forecasts = build_consumption_forecast(
+        ha_client,
+        &addon_options.current_gross_consumption_power_entity,
+        &now,
+    )
+    .await?;
 
-    let intervals = interval_iter(now, data_end.clone())
+    let forecast_end = &now + 3.days();
+
+    let intervals = interval_iter(now, forecast_end)
         .filter_map(|(start, end)| {
-            let consumption = lookup_consumption(&start, &end, &addon_options.consumption_profile)?;
+            let consumption = lookup_consumption_forecast(&start, &end, &consumption_forecasts)?;
 
             let solar_forecast = lookup_solar_forecast(&start, &end, &solar_forecasts.forecasts)?;
 
@@ -166,24 +162,53 @@ pub async fn prepare_optimizer_input(
     Ok(input_data)
 }
 
-fn lookup_consumption(
-    start: &Zoned,
-    end: &Zoned,
-    consumption_profile: &[ConsumptionProfileEntry],
-) -> Option<f64> {
-    consumption_profile
-        .iter()
-        .find(|entry| {
-            if entry.start <= entry.end {
-                // Normal same-day range, e.g. 06:00 -> 17:00.
-                // Only match when the interval itself does not cross local midnight.
-                start.date() == end.date() && start.time() >= entry.start && end.time() <= entry.end
-            } else {
-                // Overnight range, e.g. 17:00 -> 00:00 or 22:00 -> 06:00.
-                start.time() >= entry.start || end.time() <= entry.end
+async fn build_consumption_forecast(
+    ha_client: &HaClient,
+    sensor: &str,
+    now: &Zoned,
+) -> anyhow::Result<Vec<ConsumptionForecast>> {
+    let mut websocket = ha_client.connect_websocket().await?;
+    let history_start = now.clone() - 60.days();
+    info!("Fetching consumption statistics for {sensor}");
+    let statistics = websocket
+        .get_statistics(sensor, history_start, now.clone(), "5minute")
+        .await?;
+    let entries = statistics.0.get(sensor).map(Vec::as_slice).unwrap_or(&[]);
+    info!("Received {} 5-minute entries", entries.len());
+    let readings: Vec<PowerReading> = entries
+        .chunks(3)
+        .filter(|chunk| chunk.len() == 3)
+        .map(|chunk| PowerReading {
+            slot_start: chunk[0].start.clone(),
+            power_w: chunk.iter().map(|e| e.mean).sum::<f64>() / 3.0,
+        })
+        .collect();
+    let model = train(&readings)?;
+    info!("Consumption model trained on {} readings", readings.len());
+    let slots = forecast(&model, now, &readings)?;
+    info!("Consumption forecast produced {} slots", slots.len());
+    Ok(slots
+        .into_iter()
+        .map(|(start, forecast_w)| {
+            let end = start.clone() + PLANNING_INTERVAL_MINUTES.minutes();
+            ConsumptionForecast {
+                start,
+                end,
+                forecast_w,
             }
         })
-        .map(|entry| entry.load_w)
+        .collect())
+}
+
+fn lookup_consumption_forecast(
+    start: &Zoned,
+    end: &Zoned,
+    forecasts: &[ConsumptionForecast],
+) -> Option<f64> {
+    forecasts
+        .iter()
+        .find(|f| &f.start <= start && &f.end >= end)
+        .map(|f| f.forecast_w)
 }
 
 fn lookup_solar_forecast(

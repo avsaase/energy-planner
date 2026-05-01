@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use anyhow::Context;
-use jiff::civil::Time;
 use serde::Deserialize;
 
 use crate::{
@@ -11,22 +10,12 @@ use crate::{
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AddonOptions {
-    // pub ha_url: String,
-    // pub update_interval_minutes: u64,
-    // pub battery_entity: String,
     pub solar_forecast_entities: Vec<String>,
     pub electricity_price_entity: String,
     pub battery_parameters: BatteryParameters,
     pub electricity_price_parameters: ElectricityPriceParameters,
     pub grid_limit_w: f64,
-    pub consumption_profile: Vec<ConsumptionProfileEntry>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ConsumptionProfileEntry {
-    pub start: Time,
-    pub end: Time,
-    pub load_w: f64,
+    pub current_gross_consumption_power_entity: String,
 }
 
 impl AddonOptions {

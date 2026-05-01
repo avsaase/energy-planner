@@ -1,5 +1,6 @@
 use anyhow::{Context, bail};
 use futures::{SinkExt, StreamExt};
+use jiff::Zoned;
 use reqwest::Url;
 use secrecy::ExposeSecret;
 use serde_json::{Value, json};
@@ -8,7 +9,7 @@ use tracing::{debug, error, info};
 
 use crate::home_assistant::{
     client::HaClient,
-    types::{EntityState, WsMessage},
+    types::{EntityState, EntityStatistics, WsEventMessage, WsResultMessage},
 };
 
 pub struct HaWebSocket {
@@ -68,7 +69,6 @@ impl HaWebSocket {
         let id = self.next_id;
         self.next_id += 1;
 
-        // Send to msubscribe_trigger message
         self.ws
             .send(Message::text(
                 json!(
@@ -85,14 +85,14 @@ impl HaWebSocket {
             ))
             .await?;
 
-        // Wait for the response
+        // The immediate response to a command is always a result message.
         let message = self.ws.next().await.context("Connection closed")??;
         let Message::Text(message_text) = message else {
             bail!("Unexpected message");
         };
-        let message: WsMessage =
+        let message: WsResultMessage =
             serde_json::from_str(&message_text).context("Unexpected message format")?;
-        if message.success.is_none_or(|success| !success) {
+        if !message.success {
             error!(error = ?message.error, "Failed to subscribe");
             bail!("Failed to subscribe");
         }
@@ -110,24 +110,76 @@ impl HaWebSocket {
                     continue;
                 }
                 Message::Text(text) => {
-                    let ws_msg: WsMessage = serde_json::from_str(&text)?;
-
-                    if ws_msg.msg_type != "event" {
+                    // Check the type tag before committing to a full parse.
+                    let raw: Value = serde_json::from_str(&text)?;
+                    if raw["type"] != "event" {
                         continue;
                     }
 
-                    let Some(event) = ws_msg.event else {
-                        continue;
-                    };
+                    let msg: WsEventMessage = serde_json::from_value(raw)?;
 
                     debug!(
-                        entity = ?event.variables.trigger.entity_id,
-                        state =  ?event.variables.trigger.to_state,
+                        entity = ?msg.event.variables.trigger.entity_id,
+                        state  = ?msg.event.variables.trigger.to_state,
                         "Received new entity state",
-
                     );
 
-                    return Ok(event.variables.trigger.to_state);
+                    return Ok(msg.event.variables.trigger.to_state);
+                }
+                Message::Close(_) => bail!("Connection closed"),
+                _ => continue,
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn get_statistics(
+        &mut self,
+        entity_id: &str,
+        start: Zoned,
+        end: Zoned,
+        period: &str,
+    ) -> anyhow::Result<EntityStatistics> {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        self.ws
+            .send(Message::text(
+                json!(
+                    {
+                        "id": id,
+                        "type": "recorder/statistics_during_period",
+                        "start_time": start.timestamp(),
+                        "end_time": end.timestamp(),
+                        "statistic_ids": [entity_id],
+                        "period": period,
+                    }
+                )
+                .to_string(),
+            ))
+            .await?;
+
+        loop {
+            let message = self.ws.next().await.context("Connection closed")??;
+
+            match message {
+                Message::Ping(bytes) => {
+                    self.ws.send(Message::Pong(bytes)).await?;
+                    continue;
+                }
+                Message::Text(text) => {
+                    let raw: Value = serde_json::from_str(&text)?;
+                    if raw["type"] != "result" || raw["id"].as_u64() != Some(id) {
+                        continue;
+                    }
+
+                    let msg: WsResultMessage<EntityStatistics> = serde_json::from_value(raw)?;
+                    if !msg.success {
+                        bail!("Failed to get statistics: {:?}", msg.error);
+                    }
+
+                    let result = msg.result.context("Missing result field in response")?;
+                    return Ok(result);
                 }
                 Message::Close(_) => bail!("Connection closed"),
                 _ => continue,
