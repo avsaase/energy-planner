@@ -1,5 +1,5 @@
 name: "Energy Planner"
-version: "0.1.18"
+version: "0.1.19"
 slug: "energy_planner"
 description: "LP-based energy optimization"
 arch:
