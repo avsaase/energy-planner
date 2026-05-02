@@ -27,9 +27,7 @@ impl HaClient {
             .replace("http://", "ws://")
             .replace("https://", "wss://");
 
-        let ws_url = Url::parse(&ws_url)?.join("/api/websocket")?;
-
-        println!("URL: {ws_url}");
+        let ws_url = Url::parse(&ws_url)?.join("api/websocket")?;
 
         let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url.to_string()).await?;
 
