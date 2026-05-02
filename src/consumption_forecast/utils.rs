@@ -42,8 +42,14 @@ pub(super) fn feature_row(
     let dow = t.weekday().to_monday_zero_offset() as f32; // 0 = Mon, 6 = Sun
     let is_weekend = if dow >= 5.0 { 1.0_f32 } else { 0.0 };
 
-    let yesterday = index.get(&(days_ago(date, 1), slot)).copied().unwrap_or(0.0);
-    let last_week = index.get(&(days_ago(date, 7), slot)).copied().unwrap_or(0.0);
+    let yesterday = index
+        .get(&(days_ago(date, 1), slot))
+        .copied()
+        .unwrap_or(0.0);
+    let last_week = index
+        .get(&(days_ago(date, 7), slot))
+        .copied()
+        .unwrap_or(0.0);
     let avg_7d = {
         let vals: Vec<f64> = (1..=7)
             .filter_map(|d| index.get(&(days_ago(date, d), slot)).copied())

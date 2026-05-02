@@ -9,6 +9,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
     consumption_forecast::{PowerReading, forecast, train},
+    epex_prediction_client::EpexPredictionClient,
     home_assistant::{
         addon::{AddonOptions, running_as_addon},
         client::HaClient,
@@ -20,6 +21,7 @@ use crate::{
 };
 
 pub mod consumption_forecast;
+pub mod epex_prediction_client;
 pub mod home_assistant;
 pub mod optimizer;
 pub mod plot;
@@ -108,19 +110,18 @@ pub fn interval_iter(start: Zoned, until: Zoned) -> impl Iterator<Item = (Zoned,
     )
 }
 
-#[tracing::instrument(skip(ha_client, addon_options))]
+#[tracing::instrument(skip(ha_client, epex_client, addon_options))]
 pub async fn prepare_optimizer_input(
     now: Zoned,
     ha_client: &HaClient,
+    epex_client: &EpexPredictionClient,
     addon_options: &AddonOptions,
 ) -> anyhow::Result<InputData> {
     let solar_forecasts = ha_client
         .get_solar_forecast(&addon_options.solar_forecast_entities)
         .await?;
 
-    let electricty_prices = ha_client
-        .get_electricity_prices(&addon_options.electricity_price_entity)
-        .await?;
+    let electricty_prices = epex_client.fetch_electricity_prices().await?;
 
     let consumption_forecasts = build_consumption_forecast(
         ha_client,
@@ -137,13 +138,16 @@ pub async fn prepare_optimizer_input(
 
             let solar_forecast = lookup_solar_forecast(&start, &end, &solar_forecasts.forecasts)?;
 
-            let (electricity_price_eur_per_kwh_take, electricity_price_eur_per_kwh_feed) =
-                lookup_electricity_price(
-                    &start,
-                    &end,
-                    &electricty_prices.prices,
-                    addon_options.electricity_price_parameters,
-                )?;
+            let (
+                electricity_price_eur_per_kwh_take,
+                electricity_price_eur_per_kwh_feed,
+                electricity_price_is_forecast,
+            ) = lookup_electricity_price(
+                &start,
+                &end,
+                &electricty_prices.prices,
+                addon_options.electricity_price_parameters,
+            )?;
 
             Some(InputInterval {
                 start,
@@ -152,6 +156,7 @@ pub async fn prepare_optimizer_input(
                 solar_forecast_w: solar_forecast,
                 electricity_price_eur_per_kwh_take,
                 electricity_price_eur_per_kwh_feed,
+                electricity_price_is_forecast,
             })
         })
         .collect_vec();
@@ -233,17 +238,21 @@ fn lookup_electricity_price(
     end: &Zoned,
     electricity_prices: &[ElectricityPrice],
     parameters: ElectricityPriceParameters,
-) -> Option<(f64, f64)> {
-    let raw_electricity_price = electricity_prices
+) -> Option<(f64, f64, bool)> {
+    electricity_prices
         .iter()
         .find(|price| &price.start <= start && &price.end >= end)
-        .map(|price| price.price_per_kwh);
-
-    raw_electricity_price.map(|price| {
-        let effective_import_price = calculate_effective_import_price_per_kwh(price, parameters);
-        let effective_export_price = calculate_effective_export_price_per_kwh(price, parameters);
-        (effective_import_price, effective_export_price)
-    })
+        .map(|price| {
+            let effective_import_price =
+                calculate_effective_import_price_per_kwh(price.price_per_kwh, parameters);
+            let effective_export_price =
+                calculate_effective_export_price_per_kwh(price.price_per_kwh, parameters);
+            (
+                effective_import_price,
+                effective_export_price,
+                price.is_forecast,
+            )
+        })
 }
 
 fn calculate_effective_import_price_per_kwh(

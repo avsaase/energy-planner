@@ -26,6 +26,7 @@ pub struct ElectricityPrice {
     pub start: Zoned,
     pub end: Zoned,
     pub price_per_kwh: f64,
+    pub is_forecast: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +61,7 @@ pub struct InputInterval {
     pub base_load_forecast_w: f64,
     pub electricity_price_eur_per_kwh_take: f64,
     pub electricity_price_eur_per_kwh_feed: f64,
+    pub electricity_price_is_forecast: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +101,7 @@ pub struct PlanningInterval {
     pub grid_export_w: f64,
     pub electricity_price_eur_per_kwh_take: f64,
     pub electricity_price_eur_per_kwh_feed: f64,
+    pub electricity_price_is_forecast: bool,
     pub solar_production_w: f64,
     pub consumption_w: f64,
     pub battery_intent: BatteryIntent,

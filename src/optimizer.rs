@@ -152,6 +152,7 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
             grid_export_w,
             electricity_price_eur_per_kwh_take: interval.electricity_price_eur_per_kwh_take,
             electricity_price_eur_per_kwh_feed: interval.electricity_price_eur_per_kwh_feed,
+            electricity_price_is_forecast: interval.electricity_price_is_forecast,
             solar_production_w: interval.solar_forecast_w,
             consumption_w: interval.base_load_forecast_w,
             battery_intent,

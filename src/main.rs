@@ -6,6 +6,7 @@ use std::{
 use anyhow::Context;
 use energy_planner::{
     AppState,
+    epex_prediction_client::EpexPredictionClient,
     home_assistant::{addon::AddonOptions, client::HaClient},
     init_tracing, optimizer, planning_path, prepare_optimizer_input,
     server::router,
@@ -24,6 +25,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Loaded addon options: {:#?}", addon_options);
 
     let ha_client = HaClient::new()?;
+    let epex_client = EpexPredictionClient::new();
 
     let app_state = AppState::new();
 
@@ -40,8 +42,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     info!("Starting planning loop");
-    let plan_task_handle =
-        tokio::task::spawn(planning_loop(ha_client, addon_options, app_state.clone()));
+    let plan_task_handle = tokio::task::spawn(planning_loop(
+        ha_client,
+        epex_client,
+        addon_options,
+        app_state.clone(),
+    ));
 
     info!("Triggering new plan after restart");
     app_state.start_plan.notify_one();
@@ -63,6 +69,7 @@ async fn read_stored_planning_file() -> anyhow::Result<Planning> {
 
 async fn planning_loop(
     ha_client: HaClient,
+    epex_client: EpexPredictionClient,
     addon_options: AddonOptions,
     app_state: AppState,
 ) -> anyhow::Result<()> {
@@ -79,9 +86,10 @@ async fn planning_loop(
         let now = Zoned::now();
 
         let start = Instant::now();
-        let Ok(input_data) = prepare_optimizer_input(now.clone(), &ha_client, &addon_options)
-            .await
-            .inspect_err(|e| error!(error = %e, "Error preparing planning input"))
+        let Ok(input_data) =
+            prepare_optimizer_input(now.clone(), &ha_client, &epex_client, &addon_options)
+                .await
+                .inspect_err(|e| error!(error = %e, "Error preparing planning input"))
         else {
             continue;
         };

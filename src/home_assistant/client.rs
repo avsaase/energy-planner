@@ -143,6 +143,7 @@ impl HaClient {
                 start: entry.from.to_zoned(TimeZone::system()),
                 end: entry.till.to_zoned(TimeZone::system()),
                 price_per_kwh: entry.price,
+                is_forecast: false,
             })
             .sorted_by_key(|price| price.start.clone())
             .collect();

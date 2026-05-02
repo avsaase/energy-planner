@@ -5,7 +5,7 @@ use super::ForecastModel;
 use super::PowerReading;
 use super::utils::{NUM_FEATURES, build_index, feature_row};
 
-pub const FORECAST_SLOTS: usize = 96; // 24 h × 4 slots/h
+pub const FORECAST_SLOTS: usize = 2 * 24 * 4; // 3 days of 15 minute slots
 
 pub fn forecast(
     model: &ForecastModel,

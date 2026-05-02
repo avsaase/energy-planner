@@ -1,7 +1,7 @@
 use crate::types::{BatteryIntent, Planning};
 use plotly::{
     Bar, Configuration, Plot, Scatter,
-    common::{Anchor, Line, LineShape, Marker, Mode, Orientation, TickMode},
+    common::{Anchor, DashType, Line, LineShape, Marker, Mode, Orientation, TickMode},
     configuration::DisplayModeBar,
     layout::{Axis, AxisType, BarMode, Layout, Legend, Margin},
 };
@@ -30,21 +30,37 @@ pub fn generate_plot(planning: &Planning) -> String {
             )
         })
         .collect();
-    let mut import_price_step_values: Vec<f64> = planning
-        .intervals
-        .iter()
-        .map(|interval| interval.electricity_price_eur_per_kwh_take)
-        .collect();
-    if let Some(last_value) = import_price_step_values.last().copied() {
-        import_price_step_values.push(last_value);
+    // Split each price series into actual (solid) and forecast (faded) traces.
+    // Where a segment doesn't apply, use f64::NAN so plotly leaves a gap.
+    let mut import_actual: Vec<f64> = Vec::new();
+    let mut import_forecast: Vec<f64> = Vec::new();
+    let mut export_actual: Vec<f64> = Vec::new();
+    let mut export_forecast: Vec<f64> = Vec::new();
+    for interval in &planning.intervals {
+        if interval.electricity_price_is_forecast {
+            import_actual.push(f64::NAN);
+            import_forecast.push(interval.electricity_price_eur_per_kwh_take);
+            export_actual.push(f64::NAN);
+            export_forecast.push(interval.electricity_price_eur_per_kwh_feed);
+        } else {
+            import_actual.push(interval.electricity_price_eur_per_kwh_take);
+            import_forecast.push(f64::NAN);
+            export_actual.push(interval.electricity_price_eur_per_kwh_feed);
+            export_forecast.push(f64::NAN);
+        }
     }
-    let mut export_price_step_values: Vec<f64> = planning
-        .intervals
-        .iter()
-        .map(|interval| interval.electricity_price_eur_per_kwh_feed)
-        .collect();
-    if let Some(last_value) = export_price_step_values.last().copied() {
-        export_price_step_values.push(last_value);
+    // Extend by one for the step-line trailing segment.
+    if let Some(&v) = import_actual.last() {
+        import_actual.push(v);
+    }
+    if let Some(&v) = import_forecast.last() {
+        import_forecast.push(v);
+    }
+    if let Some(&v) = export_actual.last() {
+        export_actual.push(v);
+    }
+    if let Some(&v) = export_forecast.last() {
+        export_forecast.push(v);
     }
 
     let power_hover_template = "%{hovertext}: %{y:.0f}W<extra></extra>";
@@ -228,18 +244,46 @@ pub fn generate_plot(planning: &Planning) -> String {
 
     let mut price_plot = Plot::new();
     price_plot.add_trace(
-        Scatter::new(x_values.clone(), import_price_step_values)
+        Scatter::new(x_values.clone(), import_actual)
             .mode(Mode::Lines)
-            .line(Line::new().shape(LineShape::Hv))
+            .line(Line::new().shape(LineShape::Hv).color("#1d4ed8"))
             .name("Electricity import price")
             .hover_text_array(interval_labels.clone())
             .hover_template(price_hover_template),
     );
     price_plot.add_trace(
-        Scatter::new(x_values.clone(), export_price_step_values)
+        Scatter::new(x_values.clone(), import_forecast)
             .mode(Mode::Lines)
-            .line(Line::new().shape(LineShape::Hv))
+            .line(
+                Line::new()
+                    .shape(LineShape::Hv)
+                    .color("#93c5fd")
+                    .dash(DashType::Dot),
+            )
+            .name("Electricity import price (forecast)")
+            .show_legend(true)
+            .hover_text_array(interval_labels.clone())
+            .hover_template(price_hover_template),
+    );
+    price_plot.add_trace(
+        Scatter::new(x_values.clone(), export_actual)
+            .mode(Mode::Lines)
+            .line(Line::new().shape(LineShape::Hv).color("#15803d"))
             .name("Electricity export price")
+            .hover_text_array(interval_labels.clone())
+            .hover_template(price_hover_template),
+    );
+    price_plot.add_trace(
+        Scatter::new(x_values.clone(), export_forecast)
+            .mode(Mode::Lines)
+            .line(
+                Line::new()
+                    .shape(LineShape::Hv)
+                    .color("#86efac")
+                    .dash(DashType::Dot),
+            )
+            .name("Electricity export price (forecast)")
+            .show_legend(true)
             .hover_text_array(interval_labels.clone())
             .hover_template(price_hover_template),
     );
