@@ -51,6 +51,12 @@ impl AppState {
     }
 }
 
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn init_tracing() {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().pretty())

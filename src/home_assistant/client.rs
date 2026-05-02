@@ -110,7 +110,7 @@ impl HaClient {
 
         Ok(SolarForecasts {
             updated_at: Zoned::now(),
-            forecasts: forecasts,
+            forecasts,
         })
     }
 
