@@ -27,7 +27,7 @@ options:
     max_discharge_power_w: 2500
     charge_efficiency: 0.88
     discharge_efficiency: 0.88
-    min_soc_percent: 0.1
+    min_soc_percent: 0.12
     max_soc_percent: 1.0
   electricity_price_parameters:
     supplier_cost_import_eur_per_kwh: 0.0182
