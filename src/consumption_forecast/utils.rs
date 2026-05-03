@@ -1,29 +1,21 @@
 use std::collections::HashMap;
 
-use jiff::{Span, Zoned, civil::Date};
+use jiff::{
+    Span, Unit, Zoned,
+    civil::{Date, Time, Weekday},
+};
 use serde_json::json;
 
 use super::PowerReading;
 
 pub(super) const NUM_FEATURES: usize = 8;
 
-/// Index key: local date + slot-of-day (0–95).
-///
-/// Using local time here is intentional: "same slot yesterday" means the same
-/// clock hour, not the same UTC offset. A UTC-based index would land one slot
-/// off across a DST transition.
-pub(super) type SlotKey = (Date, usize);
-
-pub(super) fn slot_of_day(t: &Zoned) -> usize {
-    t.hour() as usize * 4 + t.minute() as usize / 15
-}
+/// Index key: civil date + civil time.
+pub(super) type SlotKey = (Date, Time);
 
 pub(super) fn build_index(data: &[PowerReading]) -> HashMap<SlotKey, f64> {
     data.iter()
-        .map(|r| {
-            let key = (r.slot_start.date(), slot_of_day(&r.slot_start));
-            (key, r.power_w)
-        })
+        .map(|r| ((r.slot_start.date(), r.slot_start.time()), r.power_w))
         .collect()
 }
 
@@ -38,21 +30,29 @@ pub(super) fn feature_row(
     index: &HashMap<SlotKey, f64>,
 ) -> [f32; NUM_FEATURES] {
     let date = t.date();
-    let slot = slot_of_day(t);
+    let time = t.time();
     let dow = t.weekday().to_monday_zero_offset() as f32; // 0 = Mon, 6 = Sun
-    let is_weekend = if dow >= 5.0 { 1.0_f32 } else { 0.0 };
+    let is_weekend = matches!(t.weekday(), Weekday::Saturday | Weekday::Sunday);
+
+    let minutes_since_midnight = t
+        .start_of_day()
+        .expect("Overflow")
+        .until(t)
+        .expect("Overflow")
+        .total(Unit::Minute)
+        .expect("Span not larger than hours");
 
     let yesterday = index
-        .get(&(days_ago(date, 1), slot))
+        .get(&(days_ago(date, 1), time))
         .copied()
         .unwrap_or(0.0);
     let last_week = index
-        .get(&(days_ago(date, 7), slot))
+        .get(&(days_ago(date, 7), time))
         .copied()
         .unwrap_or(0.0);
     let avg_7d = {
         let vals: Vec<f64> = (1..=7)
-            .filter_map(|d| index.get(&(days_ago(date, d), slot)).copied())
+            .filter_map(|d| index.get(&(days_ago(date, d), time)).copied())
             .collect();
         if vals.is_empty() {
             0.0
@@ -63,9 +63,9 @@ pub(super) fn feature_row(
 
     [
         dow,
+        is_weekend as u8 as f32,
         t.hour() as f32,
-        slot as f32,
-        is_weekend,
+        minutes_since_midnight as f32,
         last_15min_w as f32,
         yesterday as f32,
         last_week as f32,
