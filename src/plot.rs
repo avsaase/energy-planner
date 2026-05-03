@@ -1,4 +1,5 @@
 use crate::types::{BatteryIntent, Planning};
+use jiff::Zoned;
 use plotly::{
     Bar, Configuration, Plot, Scatter,
     common::{Anchor, DashType, Line, LineShape, Marker, Mode, Orientation, TickMode},
@@ -7,17 +8,13 @@ use plotly::{
 };
 
 pub fn generate_plot(planning: &Planning) -> String {
-    let labels: Vec<String> = planning
+    let start_times: Vec<&Zoned> = planning.intervals.iter().map(|i| &i.start).collect();
+    let soc_hover: Vec<String> = planning
         .intervals
         .iter()
-        .map(|interval| interval.start.time().strftime("%H:%M").to_string())
+        .map(|i| i.end.time().strftime("%H:%M").to_string())
         .collect();
-    let soc_labels: Vec<String> = planning
-        .intervals
-        .iter()
-        .map(|interval| interval.end.time().strftime("%H:%M").to_string())
-        .collect();
-    let x_values: Vec<f64> = (0..labels.len()).map(|index| index as f64).collect();
+    let x_values: Vec<f64> = (0..start_times.len()).map(|i| i as f64).collect();
 
     let interval_labels: Vec<String> = planning
         .intervals
@@ -26,10 +23,11 @@ pub fn generate_plot(planning: &Planning) -> String {
             format!(
                 "{}-{}",
                 interval.start.time().strftime("%H:%M"),
-                interval.end.time().strftime("%H:%M")
+                interval.end.time().strftime("%H:%M"),
             )
         })
         .collect();
+
     // Split each price series into actual (solid) and forecast (faded) traces.
     // Where a segment doesn't apply, use f64::NAN so plotly leaves a gap.
     let mut import_actual: Vec<f64> = Vec::new();
@@ -94,7 +92,7 @@ pub fn generate_plot(planning: &Planning) -> String {
             .hover_template(intent_hover_template),
     );
     intent_plot.set_layout(
-        base_layout("Battery intent", "", &labels)
+        base_layout("Battery intent", "", &start_times)
             .height(130)
             .margin(Margin::new().left(72).right(24).top(30).bottom(85))
             .y_axis(
@@ -113,11 +111,7 @@ pub fn generate_plot(planning: &Planning) -> String {
     grid_plot.add_trace(
         Bar::new(
             x_values.clone(),
-            planning
-                .intervals
-                .iter()
-                .map(|interval| interval.grid_import_w)
-                .collect(),
+            planning.intervals.iter().map(|i| i.grid_import_w).collect(),
         )
         .offset(0.1)
         .width(0.8)
@@ -131,7 +125,7 @@ pub fn generate_plot(planning: &Planning) -> String {
             planning
                 .intervals
                 .iter()
-                .map(|interval| -interval.grid_export_w)
+                .map(|i| -i.grid_export_w)
                 .collect(),
         )
         .offset(0.1)
@@ -140,7 +134,8 @@ pub fn generate_plot(planning: &Planning) -> String {
         .hover_text_array(interval_labels.clone())
         .hover_template(power_hover_template),
     );
-    grid_plot.set_layout(base_layout("Grid", "Power (W)", &labels).bar_mode(BarMode::Relative));
+    grid_plot
+        .set_layout(base_layout("Grid", "Power (W)", &start_times).bar_mode(BarMode::Relative));
     grid_plot.set_configuration(base_configuration());
     html_sections.push(grid_plot.to_inline_html(Some("planning-plot-grid")));
 
@@ -151,7 +146,7 @@ pub fn generate_plot(planning: &Planning) -> String {
             planning
                 .intervals
                 .iter()
-                .map(|interval| interval.battery_charge_w)
+                .map(|i| i.battery_charge_w)
                 .collect(),
         )
         .offset(0.1)
@@ -166,7 +161,7 @@ pub fn generate_plot(planning: &Planning) -> String {
             planning
                 .intervals
                 .iter()
-                .map(|interval| -interval.battery_discharge_w)
+                .map(|i| -i.battery_discharge_w)
                 .collect(),
         )
         .offset(0.1)
@@ -176,7 +171,7 @@ pub fn generate_plot(planning: &Planning) -> String {
         .hover_template(power_hover_template),
     );
     battery_power_plot
-        .set_layout(base_layout("Battery", "Power (W)", &labels).bar_mode(BarMode::Relative));
+        .set_layout(base_layout("Battery", "Power (W)", &start_times).bar_mode(BarMode::Relative));
     battery_power_plot.set_configuration(base_configuration());
     html_sections.push(battery_power_plot.to_inline_html(Some("planning-plot-battery-power")));
 
@@ -187,16 +182,16 @@ pub fn generate_plot(planning: &Planning) -> String {
             planning
                 .intervals
                 .iter()
-                .map(|interval| interval.battery_soc_end * 100.0)
+                .map(|i| i.battery_soc_end * 100.0)
                 .collect(),
         )
         .mode(Mode::LinesMarkers)
         .name("Battery SOC")
-        .hover_text_array(soc_labels.clone())
+        .hover_text_array(soc_hover.clone())
         .hover_template(soc_hover_template),
     );
     soc_plot.set_layout(
-        base_layout("Battery SOC", "SOC (%)", &soc_labels)
+        base_layout("Battery SOC", "SOC (%)", &start_times)
             .y_axis(Axis::new().title("SOC (%)").range(vec![0.0, 100.0])),
     );
     soc_plot.set_configuration(base_configuration());
@@ -206,11 +201,7 @@ pub fn generate_plot(planning: &Planning) -> String {
     consumption_plot.add_trace(
         Bar::new(
             x_values.clone(),
-            planning
-                .intervals
-                .iter()
-                .map(|interval| interval.consumption_w)
-                .collect(),
+            planning.intervals.iter().map(|i| i.consumption_w).collect(),
         )
         .offset(0.1)
         .width(0.8)
@@ -218,7 +209,7 @@ pub fn generate_plot(planning: &Planning) -> String {
         .hover_text_array(interval_labels.clone())
         .hover_template(power_hover_template),
     );
-    consumption_plot.set_layout(base_layout("Consumption", "Power (W)", &labels));
+    consumption_plot.set_layout(base_layout("Consumption", "Power (W)", &start_times));
     consumption_plot.set_configuration(base_configuration());
     html_sections.push(consumption_plot.to_inline_html(Some("planning-plot-consumption")));
 
@@ -229,7 +220,7 @@ pub fn generate_plot(planning: &Planning) -> String {
             planning
                 .intervals
                 .iter()
-                .map(|interval| interval.solar_production_w)
+                .map(|i| i.solar_production_w)
                 .collect(),
         )
         .offset(0.1)
@@ -238,7 +229,7 @@ pub fn generate_plot(planning: &Planning) -> String {
         .hover_text_array(interval_labels.clone())
         .hover_template(power_hover_template),
     );
-    solar_plot.set_layout(base_layout("Solar production", "Power (W)", &labels));
+    solar_plot.set_layout(base_layout("Solar production", "Power (W)", &start_times));
     solar_plot.set_configuration(base_configuration());
     html_sections.push(solar_plot.to_inline_html(Some("planning-plot-solar")));
 
@@ -287,8 +278,7 @@ pub fn generate_plot(planning: &Planning) -> String {
             .hover_text_array(interval_labels.clone())
             .hover_template(price_hover_template),
     );
-
-    price_plot.set_layout(base_layout("Electricity price", "EUR/kWh", &labels));
+    price_plot.set_layout(base_layout("Electricity price", "EUR/kWh", &start_times));
     price_plot.set_configuration(base_configuration());
     html_sections.push(price_plot.to_inline_html(Some("planning-plot-price")));
 
@@ -296,9 +286,9 @@ pub fn generate_plot(planning: &Planning) -> String {
         .join("\n<div style=\"height:1px;background:#d9d9d9;margin:0.5rem 0 0.9rem 0;\"></div>\n")
 }
 
-fn base_layout(title: &str, y_axis_label: &str, labels: &[String]) -> Layout {
-    let max_x = labels.len() as f64;
-    let (tick_values, tick_text) = hourly_ticks(labels);
+fn base_layout(title: &str, y_axis_label: &str, start_times: &[&Zoned]) -> Layout {
+    let max_x = start_times.len() as f64;
+    let (tick_values, tick_text) = hourly_ticks(start_times);
 
     Layout::new()
         .title(title)
@@ -333,16 +323,25 @@ fn base_configuration() -> Configuration {
         .display_mode_bar(DisplayModeBar::False)
 }
 
-fn hourly_ticks(labels: &[String]) -> (Vec<f64>, Vec<String>) {
-    labels
+/// Returns tick positions at every hour, with labels only for hours divisible
+/// by 3 and a date+time label at midnight.  Hours not divisible by 3 get an
+/// empty label so the tick mark appears but no text is drawn.
+fn hourly_ticks(start_times: &[&Zoned]) -> (Vec<f64>, Vec<String>) {
+    start_times
         .iter()
         .enumerate()
-        .filter_map(|(index, label)| {
-            if label.ends_with(":00") {
-                Some((index as f64, label.clone()))
-            } else {
-                None
+        .filter_map(|(i, t)| {
+            if t.minute() != 0 {
+                return None;
             }
+            let label = if t.hour() == 0 {
+                t.date().strftime("%Y-%m-%d").to_string()
+            } else if t.hour() % 3 == 0 {
+                t.time().strftime("%H:%M").to_string()
+            } else {
+                String::new()
+            };
+            Some((i as f64, label))
         })
         .unzip()
 }
