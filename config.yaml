@@ -1,5 +1,5 @@
 name: "Energy Planner"
-version: "0.1.21"
+version: "0.1.22"
 slug: "energy_planner"
 description: "LP-based energy optimization"
 arch:
@@ -22,7 +22,7 @@ options:
   battery_parameters:
     capacity_wh: 5120
     lifetime_cycles: 6000
-    purchase_cost_eur: 1200
+    purchase_cost_eur: 1345
     max_charge_power_w: 2500
     max_discharge_power_w: 2500
     charge_efficiency: 0.88
