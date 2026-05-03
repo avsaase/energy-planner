@@ -1,5 +1,5 @@
 name: "Energy Planner"
-version: "0.1.23"
+version: "0.1.24"
 slug: "energy_planner"
 description: "LP-based energy optimization"
 arch:
@@ -33,9 +33,9 @@ options:
     supplier_cost_import_eur_per_kwh: 0.0182
     supplier_cost_export_eur_per_kwh: 0.0182
     energy_tax_import_eur_per_kwh: 0.09161
-    energy_tax_export_eur_per_kwh: 0.0
+    energy_tax_export_eur_per_kwh: -0.09161
     vat_import: 0.21
-    vat_export: 0.0
+    vat_export: 0.21
   current_gross_consumption_power_entity: "sensor.gross_power_consumption"
 schema:
   solar_forecast_entities:
