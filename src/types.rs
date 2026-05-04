@@ -71,8 +71,11 @@ pub struct BatteryParameters {
     pub purchase_cost_eur: f64,
     pub max_discharge_power_w: f64,
     pub max_charge_power_w: f64,
-    pub charge_efficiency: f64,
-    pub discharge_efficiency: f64,
+    pub charge_conversion_efficiency: f64,
+    pub charge_fixed_power_loss_w: f64,
+    pub discharge_conversion_efficiency: f64,
+    pub discharge_fixed_power_loss_w: f64,
+    pub idle_power_loss_w: f64,
     pub min_soc_percent: f64,
     pub max_soc_percent: f64,
 }

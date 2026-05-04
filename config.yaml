@@ -25,17 +25,20 @@ options:
     purchase_cost_eur: 1345
     max_charge_power_w: 2500
     max_discharge_power_w: 2500
-    charge_efficiency: 0.88
-    discharge_efficiency: 0.88
+    charge_conversion_efficiency: 0.9
+    charge_fixed_power_loss_w: 10
+    discharge_conversion_efficiency: 0.9
+    discharge_fixed_power_loss_w: 10
+    idle_power_loss_w: 5
     min_soc_percent: 0.12
     max_soc_percent: 1.0
   electricity_price_parameters:
     supplier_cost_import_eur_per_kwh: 0.0182
-    supplier_cost_export_eur_per_kwh: 0.0182
+    supplier_cost_export_eur_per_kwh: -0.0182
     energy_tax_import_eur_per_kwh: 0.09161
-    energy_tax_export_eur_per_kwh: -0.09161
+    energy_tax_export_eur_per_kwh: 0
     vat_import: 0.21
-    vat_export: 0.21
+    vat_export: 0
   current_gross_consumption_power_entity: "sensor.gross_power_consumption"
 schema:
   solar_forecast_entities:
@@ -47,8 +50,11 @@ schema:
     purchase_cost_eur: float
     max_charge_power_w: float
     max_discharge_power_w: float
-    charge_efficiency: float
-    discharge_efficiency: float
+    charge_conversion_efficiency: float
+    discharge_conversion_efficiency: float
+    charge_fixed_power_loss_w: float
+    discharge_fixed_power_loss_w: float
+    idle_power_loss_w: float
     min_soc_percent: float
     max_soc_percent: float
   electricity_price_parameters:

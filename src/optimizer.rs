@@ -31,6 +31,7 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
     let grid_import = problem_variables.add_vector(variable().min(0.0), n);
     let grid_export = problem_variables.add_vector(variable().min(0.0), n);
     let battery_charge_active = problem_variables.add_vector(variable().binary(), n);
+    let battery_discharge_active = problem_variables.add_vector(variable().binary(), n);
     let soc = problem_variables.add_vector(
         variable()
             .min(input_data.battery_parameters.min_soc_percent)
@@ -69,34 +70,28 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
                 == interval.solar_forecast_w + grid_import[t] + battery_discharge[t]
         ));
 
+        let bp = &input_data.battery_parameters;
+        let charge_gain = bp.charge_conversion_efficiency * duration_hours / bp.capacity_wh;
+        let discharge_loss = duration_hours / (bp.discharge_conversion_efficiency * bp.capacity_wh);
+        let charge_fixed_loss = bp.charge_fixed_power_loss_w * duration_hours / bp.capacity_wh;
+        let discharge_fixed_loss =
+            bp.discharge_fixed_power_loss_w * duration_hours / bp.capacity_wh;
+        let idle_loss = bp.idle_power_loss_w * duration_hours / bp.capacity_wh;
+
         // SOC evolution
-        if t == 0 {
-            problem.add_constraint(constraint!(
-                soc[0]
-                    == input_data.battery_current_soc_percent
-                        + (battery_charge[0]
-                            * input_data.battery_parameters.charge_efficiency
-                            * duration_hours
-                            / input_data.battery_parameters.capacity_wh)
-                        - (battery_discharge[0]
-                            / input_data.battery_parameters.discharge_efficiency
-                            * duration_hours
-                            / input_data.battery_parameters.capacity_wh)
-            ));
+        let soc_prev = if t == 0 {
+            Expression::from(input_data.battery_current_soc_percent)
         } else {
-            problem.add_constraint(constraint!(
-                soc[t]
-                    == soc[t - 1]
-                        + (battery_charge[t]
-                            * input_data.battery_parameters.charge_efficiency
-                            * duration_hours
-                            / input_data.battery_parameters.capacity_wh)
-                        - (battery_discharge[t]
-                            / input_data.battery_parameters.discharge_efficiency
-                            * duration_hours
-                            / input_data.battery_parameters.capacity_wh)
-            ));
-        }
+            soc[t - 1].into()
+        };
+        problem.add_constraint(constraint!(
+            soc[t]
+                == soc_prev + battery_charge[t] * charge_gain
+                    - battery_charge_active[t] * charge_fixed_loss
+                    - battery_discharge[t] * discharge_loss
+                    - battery_discharge_active[t] * discharge_fixed_loss
+                    - idle_loss
+        ));
 
         // Battery power limits
         problem.add_constraint(constraint!(
@@ -114,7 +109,10 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
         problem.add_constraint(constraint!(
             battery_discharge[t]
                 <= input_data.battery_parameters.max_discharge_power_w
-                    * (1.0 - battery_charge_active[t])
+                    * battery_discharge_active[t]
+        ));
+        problem.add_constraint(constraint!(
+            battery_charge_active[t] + battery_discharge_active[t] <= 1.0
         ));
     }
 
