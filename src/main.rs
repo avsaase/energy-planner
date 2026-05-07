@@ -137,7 +137,25 @@ async fn planning_loop(
             .write()
             .await
             .current_plan
-            .replace(planning_result);
+            .replace(planning_result.clone());
+
+        // Apply the battery intent for the current interval
+        let current_intent = planning_result
+            .intervals
+            .iter()
+            .find(|i| i.start <= now && now < i.end)
+            .map(|i| &i.battery_intent);
+
+        if let Some(intent) = current_intent {
+            match ha_client.connect_websocket().await {
+                Ok(mut ws) => {
+                    if let Err(e) = ws.apply_battery_intent(intent).await {
+                        error!(error = %e, "Failed to apply battery intent");
+                    }
+                }
+                Err(e) => error!(error = %e, "Failed to connect websocket for battery intent"),
+            }
+        }
     }
 }
 

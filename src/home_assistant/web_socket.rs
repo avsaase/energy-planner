@@ -7,9 +7,12 @@ use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info};
 
-use crate::home_assistant::{
-    client::HaClient,
-    types::{EntityState, EntityStatistics, WsEventMessage, WsResultMessage},
+use crate::{
+    home_assistant::{
+        client::HaClient,
+        types::{EntityState, EntityStatistics, WsEventMessage, WsResultMessage},
+    },
+    types::BatteryIntent,
 };
 
 pub struct HaWebSocket {
@@ -126,6 +129,88 @@ impl HaWebSocket {
                 }
                 Message::Close(_) => bail!("Connection closed"),
                 _ => continue,
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self, service_data))]
+    pub async fn call_service(
+        &mut self,
+        domain: &str,
+        service: &str,
+        service_data: Value,
+    ) -> anyhow::Result<()> {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        self.ws
+            .send(Message::text(
+                json!({
+                    "id": id,
+                    "type": "call_service",
+                    "domain": domain,
+                    "service": service,
+                    "service_data": service_data,
+                })
+                .to_string(),
+            ))
+            .await?;
+
+        loop {
+            let message = self.ws.next().await.context("Connection closed")??;
+            match message {
+                Message::Ping(bytes) => {
+                    self.ws.send(Message::Pong(bytes)).await?;
+                    continue;
+                }
+                Message::Text(text) => {
+                    let raw: Value = serde_json::from_str(&text)?;
+                    if raw["type"] != "result" || raw["id"].as_u64() != Some(id) {
+                        continue;
+                    }
+                    let msg: WsResultMessage = serde_json::from_value(raw)?;
+                    if !msg.success {
+                        bail!("Service call failed: {:?}", msg.error);
+                    }
+                    return Ok(());
+                }
+                Message::Close(_) => bail!("Connection closed"),
+                _ => continue,
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn apply_battery_intent(&mut self, intent: &BatteryIntent) -> anyhow::Result<()> {
+        info!(?intent, "Applying battery intent");
+        match intent {
+            BatteryIntent::Idle | BatteryIntent::Balance | BatteryIntent::Other => {
+                self.call_service("script", "battery_set_idle", json!({}))
+                    .await
+            }
+            BatteryIntent::BalanceChargeOnly => {
+                self.call_service("script", "battery_set_balance_charge_only", json!({}))
+                    .await
+            }
+            BatteryIntent::BalanceDischargeOnly => {
+                self.call_service("script", "battery_set_balance_discharge_only", json!({}))
+                    .await
+            }
+            BatteryIntent::FixedCharge { power_w } => {
+                self.call_service(
+                    "script",
+                    "battery_set_fixed_charge",
+                    json!({ "charge_power": power_w.round() as i64 }),
+                )
+                .await
+            }
+            BatteryIntent::FixedDischarge { power_w } => {
+                self.call_service(
+                    "script",
+                    "battery_set_fixed_discharge",
+                    json!({ "discharge_power": power_w.round() as i64 }),
+                )
+                .await
             }
         }
     }
