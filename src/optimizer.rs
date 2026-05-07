@@ -186,22 +186,21 @@ fn determine_intent(
     }
 
     if is_charging && is_exporting {
-        if battery_charge_w >= battery_charge_limit_w - ZERO_W {
+        if battery_charge_w >= battery_charge_limit_w - ZERO_W || battery_charge_w >= grid_export_w
+        {
             return BatteryIntent::BalanceChargeOnly;
         } else {
-            return BatteryIntent::FixedCharge {
-                power_w: battery_charge_w,
-            };
+            return BatteryIntent::Idle;
         }
     }
 
     if is_dicharging && is_importing {
-        if battery_discharge_w >= battery_discharge_limit_w - ZERO_W {
+        if battery_discharge_w >= battery_discharge_limit_w - ZERO_W
+            || battery_discharge_w >= grid_import_w
+        {
             return BatteryIntent::BalanceDischargeOnly;
         } else {
-            return BatteryIntent::FixedDischarge {
-                power_w: battery_discharge_w,
-            };
+            return BatteryIntent::Idle;
         }
     }
 
