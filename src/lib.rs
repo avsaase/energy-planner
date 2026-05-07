@@ -161,7 +161,9 @@ pub async fn prepare_optimizer_input(
         })
         .collect_vec();
 
-    let battery_current_soc = 0.5; // TODO: get from HA
+    let battery_current_soc = ha_client
+        .get_battery_soc(&addon_options.battery_soc_entity)
+        .await?;
 
     let input_data = InputData {
         battery_parameters: addon_options.battery_parameters.clone(),

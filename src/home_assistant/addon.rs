@@ -15,6 +15,7 @@ pub struct AddonOptions {
     pub battery_parameters: BatteryParameters,
     pub electricity_price_parameters: ElectricityPriceParameters,
     pub current_gross_consumption_power_entity: String,
+    pub battery_soc_entity: String,
 }
 
 impl AddonOptions {

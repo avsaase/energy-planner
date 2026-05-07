@@ -40,6 +40,7 @@ options:
     vat_import: 0.21
     vat_export: 0
   current_gross_consumption_power_entity: "sensor.gross_power_consumption"
+  battery_soc_entity: "sensor.marstek_venus_e_v3_1_modbus_battery_soc"
 schema:
   solar_forecast_entities:
     - str
@@ -65,3 +66,4 @@ schema:
     vat_import: float
     vat_export: float
   current_gross_consumption_power_entity: str
+  battery_soc_entity: str

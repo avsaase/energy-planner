@@ -153,6 +153,19 @@ impl HaClient {
             prices,
         })
     }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn get_battery_soc(&self, entity_id: &str) -> anyhow::Result<f64> {
+        #[derive(Deserialize)]
+        struct Empty {}
+
+        let state = self.get_entity_state::<Empty>(entity_id).await?;
+        let soc: f64 = state
+            .state
+            .parse()
+            .context("Failed to parse battery SOC state as a number")?;
+        Ok(soc / 100.0)
+    }
 }
 
 fn deserialize_map_as_vec<'de, D>(deserializer: D) -> Result<Vec<(Timestamp, f64)>, D::Error>
