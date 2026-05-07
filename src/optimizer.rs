@@ -138,6 +138,8 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
             grid_export_w,
             battery_charge_w,
             battery_discharge_w,
+            input_data.battery_parameters.max_charge_power_w,
+            input_data.battery_parameters.max_discharge_power_w,
         );
 
         intervals.push(PlanningInterval {
@@ -169,6 +171,8 @@ fn determine_intent(
     grid_export_w: f64,
     battery_charge_w: f64,
     battery_discharge_w: f64,
+    battery_charge_limit_w: f64,
+    battery_discharge_limit_w: f64,
 ) -> BatteryIntent {
     const ZERO_W: f64 = 1.0;
 
@@ -182,11 +186,23 @@ fn determine_intent(
     }
 
     if is_charging && is_exporting {
-        return BatteryIntent::BalanceChargeOnly;
+        if battery_charge_w >= battery_charge_limit_w - ZERO_W {
+            return BatteryIntent::BalanceChargeOnly;
+        } else {
+            return BatteryIntent::FixedCharge {
+                power_w: battery_charge_w,
+            };
+        }
     }
 
     if is_dicharging && is_importing {
-        return BatteryIntent::BalanceDischargeOnly;
+        if battery_discharge_w >= battery_discharge_limit_w - ZERO_W {
+            return BatteryIntent::BalanceDischargeOnly;
+        } else {
+            return BatteryIntent::FixedDischarge {
+                power_w: battery_discharge_w,
+            };
+        }
     }
 
     if is_charging && is_importing {
