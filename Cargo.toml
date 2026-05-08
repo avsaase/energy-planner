@@ -23,4 +23,6 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 lightgbm3 = "1"
 
-[dev-dependencies]
+[features]
+default = ["control-battery"]
+control-battery = []
