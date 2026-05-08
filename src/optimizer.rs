@@ -32,12 +32,18 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
     let grid_export = problem_variables.add_vector(variable().min(0.0), n);
     let battery_charge_active = problem_variables.add_vector(variable().binary(), n);
     let battery_discharge_active = problem_variables.add_vector(variable().binary(), n);
-    let soc = problem_variables.add_vector(
-        variable()
-            .min(input_data.battery_parameters.min_soc_percent)
-            .max(input_data.battery_parameters.max_soc_percent),
-        n,
-    );
+
+    // Stretch the SOC limits to the current SOC
+    let current_soc = input_data.battery_current_soc_percent;
+    let min_soc = input_data
+        .battery_parameters
+        .min_soc_percent
+        .min(current_soc);
+    let max_soc = input_data
+        .battery_parameters
+        .max_soc_percent
+        .max(current_soc);
+    let soc = problem_variables.add_vector(variable().min(min_soc).max(max_soc), n);
 
     // Objective: minimize electricity cost
     let mut objective = Expression::default();
