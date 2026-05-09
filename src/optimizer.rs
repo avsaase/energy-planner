@@ -2,9 +2,9 @@ use anyhow::Context;
 use good_lp::{
     Expression, ProblemVariables, Solution, SolverModel, constraint, default_solver, variable,
 };
-use jiff::{Unit, Zoned};
+use jiff::{ToSpan, Unit, Zoned};
 
-use crate::types::{BatteryIntent, InputData, Planning, PlanningInterval};
+use crate::types::{BatteryIntent, InputData, Planning, PlanningInterval, SolverParameters};
 
 pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
     if input_data.intervals.is_empty() {
@@ -33,7 +33,8 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
     let battery_charge_active = problem_variables.add_vector(variable().binary(), n);
     let battery_discharge_active = problem_variables.add_vector(variable().binary(), n);
 
-    // Stretch the SOC limits to the current SOC
+    // Stretch the SOC limits to the current SOC to avoid infeasibility or battery actions to fix
+    // current exeedacnes of the limits.
     let current_soc = input_data.battery_current_soc_percent;
     let min_soc = input_data
         .battery_parameters
@@ -60,6 +61,10 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
         objective += (battery_charge[t] + battery_discharge[t])
             * input_data.battery_parameters.cycle_cost_eur_per_wh()
             * duration_hours;
+
+        // Small incentive for charging early to account for uncertain forecasts
+        objective -= battery_charge[t]
+            * early_charging_bonus(&now, &interval.start, &input_data.solver_parameters)
     }
 
     // Create the problem
@@ -169,6 +174,31 @@ pub fn solve(input_data: InputData, now: Zoned) -> anyhow::Result<Planning> {
         planned_at: now,
         intervals,
     })
+}
+
+/// Computes a small incentive for charging early to account for uncertain forecasts.
+///
+/// The bonus decays linearly to zero over the next 12 hours
+fn early_charging_bonus(
+    now: &Zoned,
+    current_interval_start: &Zoned,
+    solver_parameters: &SolverParameters,
+) -> f64 {
+    let zero_bonus_time = now + (solver_parameters.early_charge_bonus_decay_hours as i16).hours();
+    let hours_till_zero_bonus = current_interval_start
+        .until(&zero_bonus_time)
+        .expect("Valid span")
+        .total(Unit::Hour)
+        .expect("Valid duration");
+
+    let early_charge_bonus_per_wh = solver_parameters.early_charge_bonus_per_kwh / 1000.0;
+
+    if hours_till_zero_bonus <= 0.0 {
+        0.0
+    } else {
+        early_charge_bonus_per_wh
+            * (hours_till_zero_bonus / solver_parameters.early_charge_bonus_decay_hours as f64)
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

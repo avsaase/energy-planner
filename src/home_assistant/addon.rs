@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use crate::{
     data_dir,
-    types::{BatteryParameters, ElectricityPriceParameters},
+    types::{BatteryParameters, ElectricityPriceParameters, SolverParameters},
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -16,6 +16,7 @@ pub struct AddonOptions {
     pub electricity_price_parameters: ElectricityPriceParameters,
     pub current_gross_consumption_power_entity: String,
     pub battery_soc_entity: String,
+    pub solver_parameters: SolverParameters,
 }
 
 impl AddonOptions {

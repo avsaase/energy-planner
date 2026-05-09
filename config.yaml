@@ -1,5 +1,5 @@
 name: "Energy Planner"
-version: "0.1.27"
+version: "0.1.28"
 slug: "energy_planner"
 description: "LP-based energy optimization"
 arch:
@@ -32,6 +32,9 @@ options:
     idle_power_loss_w: 5
     min_soc_percent: 0.12
     max_soc_percent: 1.0
+  solver_parameters:
+    early_charge_bonus_per_kwh: 0.001
+    early_charge_bonus_decay_hours: 12
   electricity_price_parameters:
     supplier_cost_import_eur_per_kwh: 0.0182
     supplier_cost_export_eur_per_kwh: -0.0182
@@ -58,6 +61,9 @@ schema:
     idle_power_loss_w: float
     min_soc_percent: float
     max_soc_percent: float
+  solver_parameters:
+    early_charge_bonus_per_kwh: float
+    early_charge_bonus_decay_hours: int(1,48)
   electricity_price_parameters:
     supplier_cost_import_eur_per_kwh: float
     supplier_cost_export_eur_per_kwh: float

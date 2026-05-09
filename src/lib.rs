@@ -170,6 +170,7 @@ pub async fn prepare_optimizer_input(
         intervals,
         electricity_price_parameters: addon_options.electricity_price_parameters,
         battery_current_soc_percent: battery_current_soc,
+        solver_parameters: addon_options.solver_parameters.clone(),
     };
 
     Ok(input_data)

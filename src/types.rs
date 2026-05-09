@@ -40,6 +40,7 @@ pub struct InputData {
     pub battery_parameters: BatteryParameters,
     pub intervals: Vec<InputInterval>,
     pub electricity_price_parameters: ElectricityPriceParameters,
+    pub solver_parameters: SolverParameters,
     pub battery_current_soc_percent: f64,
 }
 
@@ -78,6 +79,12 @@ pub struct BatteryParameters {
     pub idle_power_loss_w: f64,
     pub min_soc_percent: f64,
     pub max_soc_percent: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SolverParameters {
+    pub early_charge_bonus_per_kwh: f64,
+    pub early_charge_bonus_decay_hours: u8,
 }
 
 impl BatteryParameters {
