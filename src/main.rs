@@ -13,6 +13,7 @@ use energy_planner::{
     types::Planning,
 };
 use jiff::{RoundMode, Unit, Zoned, ZonedRound};
+use tokio::task::spawn_blocking;
 use tracing::{error, info};
 
 #[tokio::main]
@@ -111,7 +112,10 @@ async fn planning_loop(
         );
 
         let start = Instant::now();
-        let Ok(planning_result) = optimizer::solve(input_data, now.clone())
+        let now_cloned = now.clone();
+        let Ok(planning_result) = spawn_blocking(move || optimizer::solve(input_data, now_cloned))
+            .await
+            .expect("Planning panicked")
             .inspect_err(|e| error!(error = %e, "Error in solver"))
         else {
             continue;
