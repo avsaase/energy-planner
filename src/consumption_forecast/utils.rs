@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use jiff::{
-    Span, Unit, Zoned,
+    RoundMode, Span, Unit, Zoned, ZonedRound,
     civil::{Date, Time, Weekday},
 };
 use serde_json::json;
@@ -10,12 +10,18 @@ use super::PowerReading;
 
 pub(super) const NUM_FEATURES: usize = 8;
 
-/// Index key: civil date + civil time.
+/// Index key: civil date + civil time truncated to the 15-minute interval boundary.
 pub(super) type SlotKey = (Date, Time);
+
+pub(super) fn slot_time(t: &Zoned) -> Time {
+    t.round(ZonedRound::new().smallest(Unit::Minute).increment(15).mode(RoundMode::Floor))
+        .expect("slot time rounding")
+        .time()
+}
 
 pub(super) fn build_index(data: &[PowerReading]) -> HashMap<SlotKey, f64> {
     data.iter()
-        .map(|r| ((r.slot_start.date(), r.slot_start.time()), r.power_w))
+        .map(|r| ((r.slot_start.date(), slot_time(&r.slot_start)), r.power_w))
         .collect()
 }
 
@@ -30,7 +36,7 @@ pub(super) fn feature_row(
     index: &HashMap<SlotKey, f64>,
 ) -> [f32; NUM_FEATURES] {
     let date = t.date();
-    let time = t.time();
+    let slot = slot_time(t);
     let dow = t.weekday().to_monday_zero_offset() as f32; // 0 = Mon, 6 = Sun
     let is_weekend = matches!(t.weekday(), Weekday::Saturday | Weekday::Sunday);
 
@@ -43,16 +49,16 @@ pub(super) fn feature_row(
         .expect("Span not larger than hours");
 
     let yesterday = index
-        .get(&(days_ago(date, 1), time))
+        .get(&(days_ago(date, 1), slot))
         .copied()
         .unwrap_or(0.0);
     let last_week = index
-        .get(&(days_ago(date, 7), time))
+        .get(&(days_ago(date, 7), slot))
         .copied()
         .unwrap_or(0.0);
     let avg_7d = {
         let vals: Vec<f64> = (1..=7)
-            .filter_map(|d| index.get(&(days_ago(date, d), time)).copied())
+            .filter_map(|d| index.get(&(days_ago(date, d), slot)).copied())
             .collect();
         if vals.is_empty() {
             0.0

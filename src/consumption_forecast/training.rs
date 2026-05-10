@@ -3,7 +3,7 @@ use lightgbm3::{Booster, Dataset};
 
 use super::ForecastModel;
 use super::PowerReading;
-use super::utils::{NUM_FEATURES, build_index, feature_row, lgbm_params};
+use super::utils::{NUM_FEATURES, build_index, feature_row, lgbm_params, slot_time};
 
 pub fn train(data: &[PowerReading]) -> anyhow::Result<ForecastModel> {
     let mut sorted: Vec<&PowerReading> = data.iter().collect();
@@ -20,7 +20,7 @@ pub fn train(data: &[PowerReading]) -> anyhow::Result<ForecastModel> {
                 .date()
                 .checked_sub(jiff::Span::new().days(1))
                 .expect("date sub"),
-            r.slot_start.time(),
+            slot_time(&r.slot_start),
         );
         if index.contains_key(&yesterday) {
             let last_15min_w = if i > 0 { sorted[i - 1].power_w } else { 0.0 };
