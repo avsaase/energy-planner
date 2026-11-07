@@ -1,20 +1,24 @@
 use std::{
-    fs::{File, remove_file},
-    time::{Duration, Instant},
+    fs::remove_file,
+    sync::{Arc, Mutex},
 };
 
 use anyhow::Context;
 use energy_planner::{
     AppState,
-    epex_prediction_client::EpexPredictionClient,
+    forecasts::load_forecaster,
     home_assistant::{addon::AddonOptions, client::HaClient},
-    init_tracing, optimizer, planning_path, prepare_optimizer_input,
+    init_tracing,
+    live::{LiveData, SharedLive, load_recent_history, run_live_updates},
+    planning::{load_stored_plan, planning_loop},
+    planning_path,
+    refresh::refresh_loop,
     server::router,
-    types::Planning,
 };
-use jiff::{RoundMode, Unit, Zoned, ZonedRound};
 use tokio::task::spawn_blocking;
 use tracing::{error, info};
+
+const LISTEN_ADDRESS: &str = "0.0.0.0:8099";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -22,170 +26,56 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Starting energy planner");
 
-    let addon_options = AddonOptions::load()?;
-    info!("Loaded addon options: {:#?}", addon_options);
+    let options = Arc::new(AddonOptions::load()?);
+
+    // Claim the web UI port first: if another planner is running, stop before touching anything.
+    let listener = tokio::net::TcpListener::bind(LISTEN_ADDRESS)
+        .await
+        .with_context(|| {
+            format!("Cannot listen on {LISTEN_ADDRESS}. Is another energy planner still running?")
+        })?;
+    info!("Loaded addon options: {:#?}", options);
 
     let ha_client = HaClient::new()?;
-    let epex_client = EpexPredictionClient::new();
-
     let app_state = AppState::new();
 
-    if let Ok(stored_planning) = read_stored_planning_file().await {
+    if let Ok(stored_planning) = load_stored_plan() {
         info!("Loaded existing plan from disk");
-        app_state
-            .write()
-            .await
-            .current_plan
-            .replace(stored_planning);
+        app_state.publish_plan(stored_planning).await;
     } else {
         error!("Failed to read planning from disk, starting with empty plan");
         let _ = remove_file(planning_path());
     }
 
-    info!("Starting planning loop");
-    let plan_task_handle = tokio::task::spawn(planning_loop(
-        ha_client,
-        epex_client,
-        addon_options,
+    info!("Loading forecast model");
+    let forecaster = {
+        let forecaster_options = options.forecaster.clone();
+        spawn_blocking(move || load_forecaster(&forecaster_options)).await?
+    };
+
+    let live: SharedLive = Arc::new(Mutex::new(LiveData::connect(&ha_client, &options).await));
+    if let Err(e) = load_recent_history(&ha_client, &live).await {
+        error!(error = %e, "Failed to load live sensor history");
+    }
+
+    tokio::spawn(run_live_updates(
+        ha_client.clone(),
+        live.clone(),
+        app_state.clone(),
+        options.replanning.soc_deviation,
+    ));
+    tokio::spawn(refresh_loop(
+        ha_client.clone(),
+        options.clone(),
+        forecaster,
         app_state.clone(),
     ));
+    let plan_task_handle = tokio::spawn(planning_loop(ha_client, options, live, app_state.clone()));
 
-    info!("Triggering new plan after restart");
-    app_state.start_plan.notify_one();
-
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8099").await?;
     info!("Serving on http://localhost:8099");
     axum::serve(listener, router(app_state)).await?;
 
-    plan_task_handle.await.expect("Task panicked")?;
+    plan_task_handle.await.expect("Task panicked");
 
     Ok(())
-}
-
-async fn read_stored_planning_file() -> anyhow::Result<Planning> {
-    let file = File::open(planning_path()).context("Failed to read planning file")?;
-    let planning = serde_json::from_reader(file).context("Failed to parse planning file")?;
-    Ok(planning)
-}
-
-async fn planning_loop(
-    ha_client: HaClient,
-    epex_client: EpexPredictionClient,
-    addon_options: AddonOptions,
-    app_state: AppState,
-) -> anyhow::Result<()> {
-    loop {
-        tokio::select! {
-            _ = sleep_till_next_planning() => {
-                    info!("Woke up for next planning iteration");
-                },
-            _ = app_state.start_plan.notified() => {
-                info!("Received request to start planning immediately");
-            },
-        }
-
-        let now = Zoned::now();
-
-        let start = Instant::now();
-        let Ok(input_data) =
-            prepare_optimizer_input(now.clone(), &ha_client, &epex_client, &addon_options)
-                .await
-                .inspect_err(|e| error!(error = %e, "Error preparing planning input"))
-        else {
-            continue;
-        };
-        let elapsed = start.elapsed();
-
-        info!(
-            "Prepared optimizer input data from {} to {} in {} ms",
-            input_data
-                .intervals
-                .first()
-                .map(|i| i.start.clone())
-                .unwrap_or_default(),
-            input_data
-                .intervals
-                .last()
-                .map(|i| i.end.clone())
-                .unwrap_or_default(),
-            elapsed.as_millis()
-        );
-
-        let start = Instant::now();
-        let now_cloned = now.clone();
-        let Ok(planning_result) = spawn_blocking(move || optimizer::solve(input_data, now_cloned))
-            .await
-            .expect("Planning panicked")
-            .inspect_err(|e| error!(error = %e, "Error in solver"))
-        else {
-            continue;
-        };
-
-        info!(
-            "Completed planning for {} intervals in {} ms",
-            planning_result.intervals.len(),
-            start.elapsed().as_millis()
-        );
-
-        // Write the plan to disk for persistence
-        let _ = File::create(planning_path())
-            .context("Failed to create planning file")
-            .and_then(|file| {
-                serde_json::to_writer_pretty(file, &planning_result)
-                    .context("Failed to write planning to file")
-            })
-            .inspect_err(|e| error!(error = %e, "Failed to write planning to disk"));
-
-        // Update the in memory state
-        let _ = app_state
-            .write()
-            .await
-            .current_plan
-            .replace(planning_result.clone());
-
-        // Apply the battery intent for the current interval
-        #[cfg(feature = "control-battery")]
-        {
-            let current_intent = planning_result
-                .intervals
-                .iter()
-                .find(|i| i.start <= now && now < i.end)
-                .map(|i| &i.battery_intent);
-
-            if let Some(intent) = current_intent {
-                match ha_client.connect_websocket().await {
-                    Ok(mut ws) => {
-                        if let Err(e) = ws.apply_battery_intent(intent).await {
-                            error!(error = %e, "Failed to apply battery intent");
-                        }
-                    }
-                    Err(e) => error!(error = %e, "Failed to connect websocket for battery intent"),
-                }
-            }
-        }
-    }
-}
-
-async fn sleep_till_next_planning() {
-    let now = Zoned::now();
-    let next = now
-        .round(
-            ZonedRound::new()
-                .smallest(Unit::Minute)
-                .increment(15)
-                .mode(RoundMode::Ceil),
-        )
-        .expect("Rounding up to 15 minutes works");
-    let mut duration: Duration = now
-        .duration_until(&next)
-        .try_into()
-        .expect("Duration until next timestamp is non-negative");
-    duration += Duration::from_micros(1); // Add 1 us to ensure we are past the next timestamp
-
-    info!(
-        next = %next,
-        duration_secs = %duration.as_secs(),
-        "Sleeping until next planning iteration"
-    );
-    tokio::time::sleep(duration).await;
 }

@@ -2,6 +2,7 @@
 name = "energy-planner"
 version = "0.1.0"
 edition = "2024"
+default-run = "energy-planner"
 
 [dependencies]
 anyhow = "1.0.100"
@@ -21,7 +22,11 @@ tokio = { version = "1.51.1", features = ["full"] }
 tokio-tungstenite = { version = "0.29.0", features = ["native-tls"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-lightgbm3 = "1"
+# ONNX Runtime for the forecast model; `download-binaries` links a prebuilt runtime statically.
+ort = { version = "2.0.0-rc.15", default-features = false, features = ["std", "tracing", "download-binaries", "tls-native"] }
+
+[dev-dependencies]
+tokio = { version = "1.51.1", features = ["full", "test-util"] }
 
 [features]
 default = ["control-battery"]

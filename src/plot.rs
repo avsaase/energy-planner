@@ -7,7 +7,8 @@ use plotly::{
     layout::{Axis, AxisType, BarMode, Layout, Legend, Margin},
 };
 
-pub fn generate_plot(planning: &Planning) -> String {
+/// The plan's charts as `(element id, figure)`, in display order.
+pub fn generate_plots(planning: &Planning) -> Vec<(&'static str, Plot)> {
     let start_times: Vec<&Zoned> = planning.intervals.iter().map(|i| &i.start).collect();
     let soc_hover: Vec<String> = planning
         .intervals
@@ -78,7 +79,7 @@ pub fn generate_plot(planning: &Planning) -> String {
         })
         .unzip();
 
-    let mut html_sections = Vec::new();
+    let mut plots = Vec::new();
 
     let mut intent_plot = Plot::new();
     intent_plot.add_trace(
@@ -105,7 +106,7 @@ pub fn generate_plot(planning: &Planning) -> String {
             ),
     );
     intent_plot.set_configuration(base_configuration());
-    html_sections.push(intent_plot.to_inline_html(Some("planning-plot-battery-intent")));
+    plots.push(("planning-plot-battery-intent", intent_plot));
 
     let mut grid_plot = Plot::new();
     grid_plot.add_trace(
@@ -137,7 +138,7 @@ pub fn generate_plot(planning: &Planning) -> String {
     grid_plot
         .set_layout(base_layout("Grid", "Power (W)", &start_times).bar_mode(BarMode::Relative));
     grid_plot.set_configuration(base_configuration());
-    html_sections.push(grid_plot.to_inline_html(Some("planning-plot-grid")));
+    plots.push(("planning-plot-grid", grid_plot));
 
     let mut battery_power_plot = Plot::new();
     battery_power_plot.add_trace(
@@ -173,7 +174,7 @@ pub fn generate_plot(planning: &Planning) -> String {
     battery_power_plot
         .set_layout(base_layout("Battery", "Power (W)", &start_times).bar_mode(BarMode::Relative));
     battery_power_plot.set_configuration(base_configuration());
-    html_sections.push(battery_power_plot.to_inline_html(Some("planning-plot-battery-power")));
+    plots.push(("planning-plot-battery-power", battery_power_plot));
 
     let mut soc_plot = Plot::new();
     soc_plot.add_trace(
@@ -195,7 +196,7 @@ pub fn generate_plot(planning: &Planning) -> String {
             .y_axis(Axis::new().title("SOC (%)").range(vec![0.0, 100.0])),
     );
     soc_plot.set_configuration(base_configuration());
-    html_sections.push(soc_plot.to_inline_html(Some("planning-plot-battery-soc")));
+    plots.push(("planning-plot-battery-soc", soc_plot));
 
     let mut consumption_plot = Plot::new();
     consumption_plot.add_trace(
@@ -211,7 +212,7 @@ pub fn generate_plot(planning: &Planning) -> String {
     );
     consumption_plot.set_layout(base_layout("Consumption", "Power (W)", &start_times));
     consumption_plot.set_configuration(base_configuration());
-    html_sections.push(consumption_plot.to_inline_html(Some("planning-plot-consumption")));
+    plots.push(("planning-plot-consumption", consumption_plot));
 
     let mut solar_plot = Plot::new();
     solar_plot.add_trace(
@@ -231,7 +232,7 @@ pub fn generate_plot(planning: &Planning) -> String {
     );
     solar_plot.set_layout(base_layout("Solar production", "Power (W)", &start_times));
     solar_plot.set_configuration(base_configuration());
-    html_sections.push(solar_plot.to_inline_html(Some("planning-plot-solar")));
+    plots.push(("planning-plot-solar", solar_plot));
 
     let mut price_plot = Plot::new();
     price_plot.add_trace(
@@ -280,10 +281,9 @@ pub fn generate_plot(planning: &Planning) -> String {
     );
     price_plot.set_layout(base_layout("Electricity price", "EUR/kWh", &start_times));
     price_plot.set_configuration(base_configuration());
-    html_sections.push(price_plot.to_inline_html(Some("planning-plot-price")));
+    plots.push(("planning-plot-price", price_plot));
 
-    html_sections
-        .join("\n<div style=\"height:1px;background:#d9d9d9;margin:0.5rem 0 0.9rem 0;\"></div>\n")
+    plots
 }
 
 fn base_layout(title: &str, y_axis_label: &str, start_times: &[&Zoned]) -> Layout {

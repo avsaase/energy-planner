@@ -1,2 +1,5 @@
 /target
 /data
+/forecaster/.venv
+__pycache__/
+.pytest_cache/

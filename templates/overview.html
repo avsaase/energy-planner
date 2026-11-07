@@ -1,0 +1,11 @@
+<h2 class="overview-title">Overview</h2>
+<div class="overview-grid">
+    <p class="overview-item"><strong>Last planning time:</strong> {{ planned_at }}</p>
+    <p class="overview-item"><strong>Interval:</strong> {{ first_interval_start }} - {{ first_interval_end }}</p>
+    <p class="overview-item"><strong>Grid:</strong> {{ "{:.0}"|format(first_interval_grid_w) }} W</p>
+    <p class="overview-item"><strong>Battery:</strong> {{ "{:.0}"|format(first_interval_battery_w) }} W</p>
+    <p class="overview-item"><strong>Solar:</strong> {{ "{:.0}"|format(first_interval_solar_w) }} W</p>
+    <p class="overview-item"><strong>Consumption:</strong> {{ "{:.0}"|format(first_interval_consumption_w) }} W</p>
+    <p class="overview-item"><strong>Battery mode:</strong> {{ first_interval_mode }}</p>
+    <p class="overview-item" title="Low / expected / high net-load scenario and what the optimizer does with the battery in each (+ discharge)"><strong>Scenarios:</strong> {{ first_interval_scenarios }}</p>
+</div>

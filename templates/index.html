@@ -104,55 +104,122 @@
 <body>
     <main>
         <h1>Energy Planning</h1>
-        {% if has_plot %}
-        <section class="overview" aria-label="Planning overview">
-            <h2 class="overview-title">Overview</h2>
-            <div class="overview-grid">
-                <p class="overview-item"><strong>Last planning time:</strong> {{ planned_at }}</p>
-                <p class="overview-item"><strong>Interval:</strong> {{ first_interval_start }} - {{ first_interval_end }}</p>
-                <p class="overview-item"><strong>Grid:</strong> {{ "{:.0}"|format(first_interval_grid_w) }} W</p>
-                <p class="overview-item"><strong>Battery:</strong> {{ "{:.0}"|format(first_interval_battery_w) }} W</p>
-                <p class="overview-item"><strong>Solar:</strong> {{ "{:.0}"|format(first_interval_solar_w) }} W</p>
-                <p class="overview-item"><strong>Consumption:</strong> {{ "{:.0}"|format(first_interval_consumption_w) }} W</p>
-            </div>
-        </section>
-        <p class="meta">Generated for {{ interval_count }} intervals.</p>
-        {{ plot_html|safe }}
-        <script>
-            (function disablePlotlyZoomPan() {
-                if (!window.Plotly) {
-                    return;
-                }
-
-                const lockInteractions = () => {
-                    const plots = document.querySelectorAll(".js-plotly-plot");
-                    plots.forEach((plot) => {
-                        const updates = { dragmode: false };
-                        const layout = plot.layout || {};
-
-                        Object.keys(layout).forEach((axisKey) => {
-                            if (/^[xy]axis\d*$/.test(axisKey)) {
-                                updates[`${axisKey}.fixedrange`] = true;
-                            }
-                        });
-
-                        if (Object.keys(updates).length === 1) {
-                            updates["xaxis.fixedrange"] = true;
-                            updates["yaxis.fixedrange"] = true;
-                        }
-
-                        window.Plotly.relayout(plot, updates).catch(() => {});
-                    });
-                };
-
-                // Inline plot scripts run during HTML parse; defer one tick to ensure plots exist.
-                window.requestAnimationFrame(lockInteractions);
-            })();
-        </script>
-        {% else %}
-        <p class="meta">No planning result available yet.</p>
-        <div class="empty">The optimizer has not published a planning result yet.</div>
-        {% endif %}
+        <section class="overview" id="overview" aria-label="Planning overview" hidden></section>
+        <p class="meta"><span id="interval-count"></span> <span id="connection">connecting…</span></p>
+        <div id="plots"></div>
+        <p class="meta" id="no-plan" hidden>No planning result available yet.</p>
+        <div class="empty" id="no-plan-detail" hidden>The optimizer has not published a planning result yet.</div>
     </main>
+    <script>
+        // Relative URLs: the page may be served under Home Assistant's ingress path prefix.
+        (function () {
+            const SILENCE_BEFORE_POLLING_MS = 45000; // server pings every 15 s
+            const POLL_INTERVAL_MS = 30000;
+            let shownVersion = null;
+            let fetching = null;
+
+            const separator = () => {
+                const div = document.createElement("div");
+                div.style.cssText = "height:1px;background:#d9d9d9;margin:0.5rem 0 0.9rem 0;";
+                return div;
+            };
+
+            // Charts are read-only: no zooming or panning.
+            const lockInteractions = (figure) => {
+                const layout = { ...figure.layout, dragmode: false };
+                Object.keys(layout).forEach((key) => {
+                    if (/^[xy]axis\d*$/.test(key)) {
+                        layout[key] = { ...layout[key], fixedrange: true };
+                    }
+                });
+                layout.xaxis = { ...(layout.xaxis || {}), fixedrange: true };
+                layout.yaxis = { ...(layout.yaxis || {}), fixedrange: true };
+                return layout;
+            };
+
+            const render = (plan) => {
+                const hasPlan = plan.interval_count > 0;
+                document.getElementById("no-plan").hidden = hasPlan;
+                document.getElementById("no-plan-detail").hidden = hasPlan;
+                const overview = document.getElementById("overview");
+                overview.hidden = !hasPlan;
+                overview.innerHTML = plan.overview_html;
+                document.getElementById("interval-count").textContent =
+                    hasPlan ? `Generated for ${plan.interval_count} intervals.` : "";
+
+                const container = document.getElementById("plots");
+                plan.plots.forEach(({ id, figure }, index) => {
+                    let div = document.getElementById(id);
+                    if (!div) {
+                        if (index > 0) container.appendChild(separator());
+                        div = document.createElement("div");
+                        div.id = id;
+                        container.appendChild(div);
+                    }
+                    window.Plotly.react(div, figure.data, lockInteractions(figure), figure.config);
+                });
+                shownVersion = plan.version;
+            };
+
+            // One fetch at a time; a newer version arriving meanwhile triggers another.
+            const refresh = async (version) => {
+                if (version !== undefined && version === shownVersion) return;
+                if (fetching) return fetching.then(() => refresh(version));
+                fetching = (async () => {
+                    try {
+                        const response = await fetch("plan", { cache: "no-store" });
+                        if (response.ok) render(await response.json());
+                    } catch (e) {
+                        console.warn("Failed to load plan", e);
+                    }
+                })();
+                await fetching;
+                fetching = null;
+            };
+
+            const setConnection = (text) => {
+                document.getElementById("connection").textContent = text;
+            };
+
+            const startPolling = () => {
+                setConnection("· updating every 30 s (live updates unavailable)");
+                setInterval(async () => {
+                    try {
+                        const response = await fetch("version", { cache: "no-store" });
+                        if (response.ok) refresh((await response.json()).version);
+                    } catch (e) {
+                        console.warn("Failed to check plan version", e);
+                    }
+                }, POLL_INTERVAL_MS);
+            };
+
+            refresh();
+
+            if (!window.EventSource) {
+                startPolling();
+                return;
+            }
+            let lastEvent = Date.now();
+            const events = new EventSource("events");
+            events.addEventListener("plan", (event) => {
+                lastEvent = Date.now();
+                setConnection("· live");
+                refresh(Number(event.data));
+            });
+            events.addEventListener("ping", () => {
+                lastEvent = Date.now();
+                setConnection("· live");
+            });
+            events.addEventListener("error", () => setConnection("· reconnecting…"));
+            // A buffering proxy delivers neither updates nor pings: fall back to polling.
+            const watchdog = setInterval(() => {
+                if (Date.now() - lastEvent > SILENCE_BEFORE_POLLING_MS) {
+                    clearInterval(watchdog);
+                    events.close();
+                    startPolling();
+                }
+            }, 5000);
+        })();
+    </script>
 </body>
 </html>

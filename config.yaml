@@ -1,5 +1,5 @@
 name: "Energy Planner"
-version: "0.1.29"
+version: "0.2.0"
 slug: "energy_planner"
 description: "LP-based energy optimization"
 arch:
@@ -42,8 +42,23 @@ options:
     energy_tax_export_eur_per_kwh: 0
     vat_import: 0.21
     vat_export: 0
-  current_gross_consumption_power_entity: "sensor.gross_power_consumption"
   battery_soc_entity: "sensor.marstek_venus_e_v3_1_modbus_battery_soc"
+  # Power sensors; house load = grid + PV + battery. They need long-term statistics
+  # (state_class: measurement). Conventions: grid + import, battery + discharge (use *_invert
+  # otherwise).
+  sensors:
+    grid_power_entity: "sensor.p1_meter_power"
+    grid_power_invert: false
+    solar_power_entity: "sensor.solar_power"
+    battery_power_entity: "sensor.marstek_venus_e_v3_1_modbus_battery_power"
+    battery_power_invert: false
+  replanning:
+    net_load_change_threshold_w: 300
+    net_load_change_sustain_seconds: 15
+    min_interval_seconds: 20
+    soc_deviation: 0.03
+    scenario_quantile: 0.9
+    scenario_min_spread_w: 300
 schema:
   solar_forecast_entities:
     - str
@@ -71,5 +86,19 @@ schema:
     energy_tax_export_eur_per_kwh: float
     vat_import: float
     vat_export: float
-  current_gross_consumption_power_entity: str
   battery_soc_entity: str
+  sensors:
+    grid_power_entity: str
+    grid_power_invert: bool
+    solar_power_entity: str
+    battery_power_entity: str
+    battery_power_invert: bool
+    outdoor_temperature_entity: str?
+    weather_entity: str?
+  replanning:
+    net_load_change_threshold_w: float
+    net_load_change_sustain_seconds: int(1,600)
+    min_interval_seconds: int(5,3600)
+    soc_deviation: float(0,1)
+    scenario_quantile: float(0.5,0.99)
+    scenario_min_spread_w: float

@@ -154,6 +154,17 @@ impl HaClient {
         })
     }
 
+    /// Factor converting the entity's state to W (or to a fraction for `%`).
+    #[tracing::instrument(skip(self))]
+    pub async fn get_unit_factor(&self, entity_id: &str) -> anyhow::Result<f64> {
+        let state = self
+            .get_entity_state::<serde_json::Value>(entity_id)
+            .await?;
+        Ok(unit_factor(
+            state.attributes["unit_of_measurement"].as_str(),
+        ))
+    }
+
     #[tracing::instrument(skip(self))]
     pub async fn get_battery_soc(&self, entity_id: &str) -> anyhow::Result<f64> {
         #[derive(Deserialize)]
@@ -176,4 +187,14 @@ where
     let mut vec: Vec<(Timestamp, f64)> = map.into_iter().collect();
     vec.sort_by_key(|(timestamp, _)| *timestamp);
     Ok(vec)
+}
+
+/// Factor converting a value in `unit` to W (power) or a fraction (`%`). Unknown units: 1.
+pub fn unit_factor(unit: Option<&str>) -> f64 {
+    match unit {
+        Some("kW") => 1000.0,
+        Some("MW") => 1_000_000.0,
+        Some("%") => 0.01,
+        _ => 1.0,
+    }
 }

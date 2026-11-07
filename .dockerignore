@@ -3,3 +3,6 @@ target/
 .jj/
 .github/
 **/*.rs.bk
+forecaster/.venv/
+**/__pycache__/
+data/

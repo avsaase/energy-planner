@@ -1,8 +1,11 @@
+use std::collections::HashMap;
+
 use anyhow::{Context, bail};
 use futures::{SinkExt, StreamExt};
-use jiff::Zoned;
+use jiff::{SignedDuration, Timestamp};
 use reqwest::Url;
 use secrecy::ExposeSecret;
+use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info};
@@ -14,6 +17,9 @@ use crate::{
     },
     types::BatteryIntent,
 };
+
+/// Time window per history request (see [`HaWebSocket::get_history`]).
+const HISTORY_CHUNK: SignedDuration = SignedDuration::from_hours(6);
 
 pub struct HaWebSocket {
     pub(super) ws: tokio_tungstenite::WebSocketStream<
@@ -101,7 +107,11 @@ impl HaWebSocket {
         Ok(message.id)
     }
 
-    pub async fn next_state_change(&mut self) -> anyhow::Result<EntityState<Value>> {
+    /// Next state change from a [`Self::subscribe_to_entities`] subscription as
+    /// `(entity_id, new_state)`. The state is `None` when the entity was removed.
+    pub async fn next_state_change(
+        &mut self,
+    ) -> anyhow::Result<(String, Option<EntityState<Value>>)> {
         loop {
             let message = self.ws.next().await.context("Connection closed")??;
 
@@ -125,7 +135,41 @@ impl HaWebSocket {
                         "Received new entity state",
                     );
 
-                    return Ok(msg.event.variables.trigger.to_state);
+                    let trigger = msg.event.variables.trigger;
+                    return Ok((trigger.entity_id, trigger.to_state));
+                }
+                Message::Close(_) => bail!("Connection closed"),
+                _ => continue,
+            }
+        }
+    }
+
+    /// Sends a command and waits for its result message.
+    async fn command<T: DeserializeOwned>(&mut self, mut payload: Value) -> anyhow::Result<T> {
+        let id = self.next_id;
+        self.next_id += 1;
+        payload["id"] = id.into();
+
+        self.ws.send(Message::text(payload.to_string())).await?;
+
+        loop {
+            let message = self.ws.next().await.context("Connection closed")??;
+            match message {
+                Message::Ping(bytes) => {
+                    self.ws.send(Message::Pong(bytes)).await?;
+                    continue;
+                }
+                Message::Text(text) => {
+                    let raw: Value = serde_json::from_str(&text)?;
+                    if raw["type"] != "result" || raw["id"].as_u64() != Some(id) {
+                        continue;
+                    }
+                    let msg: WsResultMessage<Value> = serde_json::from_value(raw)?;
+                    if !msg.success {
+                        bail!("Command {} failed: {:?}", payload["type"], msg.error);
+                    }
+                    return serde_json::from_value(msg.result.unwrap_or(Value::Null))
+                        .with_context(|| format!("Unexpected result for {}", payload["type"]));
                 }
                 Message::Close(_) => bail!("Connection closed"),
                 _ => continue,
@@ -140,52 +184,98 @@ impl HaWebSocket {
         service: &str,
         service_data: Value,
     ) -> anyhow::Result<()> {
-        let id = self.next_id;
-        self.next_id += 1;
+        self.command::<Value>(json!({
+            "type": "call_service",
+            "domain": domain,
+            "service": service,
+            "service_data": service_data,
+        }))
+        .await?;
+        Ok(())
+    }
 
-        self.ws
-            .send(Message::text(
-                json!({
-                    "id": id,
-                    "type": "call_service",
-                    "domain": domain,
-                    "service": service,
-                    "service_data": service_data,
-                })
-                .to_string(),
-            ))
-            .await?;
-
-        loop {
-            let message = self.ws.next().await.context("Connection closed")??;
-            match message {
-                Message::Ping(bytes) => {
-                    self.ws.send(Message::Pong(bytes)).await?;
-                    continue;
-                }
-                Message::Text(text) => {
-                    let raw: Value = serde_json::from_str(&text)?;
-                    if raw["type"] != "result" || raw["id"].as_u64() != Some(id) {
-                        continue;
-                    }
-                    let msg: WsResultMessage = serde_json::from_value(raw)?;
-                    if !msg.success {
-                        bail!("Service call failed: {:?}", msg.error);
-                    }
-                    return Ok(());
-                }
-                Message::Close(_) => bail!("Connection closed"),
-                _ => continue,
+    /// Raw state changes of several entities between `start` and `end` (`NaN` for non-numeric
+    /// states such as `unavailable`). Values are as reported, in each entity's own unit.
+    ///
+    /// Fetched per entity in [`HISTORY_CHUNK`] windows: a 1 Hz sensor produces ~3 MB of history
+    /// per day, and a websocket message may not exceed 16 MiB.
+    #[tracing::instrument(skip(self))]
+    pub async fn get_history(
+        &mut self,
+        entity_ids: &[&str],
+        start: Timestamp,
+        end: Timestamp,
+    ) -> anyhow::Result<HashMap<String, Vec<(Timestamp, f64)>>> {
+        let mut history: HashMap<String, Vec<(Timestamp, f64)>> = HashMap::new();
+        for &entity in entity_ids {
+            let points = history.entry(entity.to_string()).or_default();
+            let mut chunk_start = start;
+            while chunk_start < end {
+                let chunk_end = (chunk_start + HISTORY_CHUNK).min(end);
+                let chunk = self
+                    .get_history_chunk(entity, chunk_start, chunk_end)
+                    .await
+                    .with_context(|| format!("History of {entity} from {chunk_start}"))?;
+                // Each chunk repeats the state at its start time; skip what we already have.
+                let last = points.last().map(|(t, _)| *t);
+                points.extend(
+                    chunk
+                        .into_iter()
+                        .filter(|(t, _)| last.is_none_or(|l| *t > l)),
+                );
+                chunk_start = chunk_end;
             }
         }
+        Ok(history)
+    }
+
+    async fn get_history_chunk(
+        &mut self,
+        entity_id: &str,
+        start: Timestamp,
+        end: Timestamp,
+    ) -> anyhow::Result<Vec<(Timestamp, f64)>> {
+        #[derive(Deserialize)]
+        struct CompressedState {
+            s: String,
+            /// Last updated / last changed, epoch seconds. Which keys are present depends on the
+            /// HA version and on whether the two differ.
+            lu: Option<f64>,
+            lc: Option<f64>,
+        }
+        let mut result: HashMap<String, Vec<CompressedState>> = self
+            .command(json!({
+                "type": "history/history_during_period",
+                "start_time": start,
+                "end_time": end,
+                "entity_ids": [entity_id],
+                "minimal_response": true,
+                "no_attributes": true,
+                "significant_changes_only": false,
+            }))
+            .await?;
+        Ok(result
+            .remove(entity_id)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|st| {
+                let secs = st.lc.or(st.lu)?;
+                let at = Timestamp::from_millisecond((secs * 1000.0) as i64).ok()?;
+                Some((at, st.s.parse().unwrap_or(f64::NAN)))
+            })
+            .collect())
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn apply_battery_intent(&mut self, intent: &BatteryIntent) -> anyhow::Result<()> {
         info!(?intent, "Applying battery intent");
         match intent {
-            BatteryIntent::Idle | BatteryIntent::Balance | BatteryIntent::Other => {
+            BatteryIntent::Idle | BatteryIntent::Other => {
                 self.call_service("script", "battery_set_idle", json!({}))
+                    .await
+            }
+            BatteryIntent::Balance => {
+                self.call_service("script", "battery_set_balance", json!({}))
                     .await
             }
             BatteryIntent::BalanceChargeOnly => {
@@ -215,58 +305,24 @@ impl HaWebSocket {
         }
     }
 
+    /// Long-term statistics, with power converted to W.
     #[tracing::instrument(skip(self))]
     pub async fn get_statistics(
         &mut self,
-        entity_id: &str,
-        start: Zoned,
-        end: Zoned,
+        entity_ids: &[&str],
+        start: Timestamp,
+        end: Timestamp,
         period: &str,
     ) -> anyhow::Result<EntityStatistics> {
-        let id = self.next_id;
-        self.next_id += 1;
-
-        self.ws
-            .send(Message::text(
-                json!(
-                    {
-                        "id": id,
-                        "type": "recorder/statistics_during_period",
-                        "start_time": start.timestamp(),
-                        "end_time": end.timestamp(),
-                        "statistic_ids": [entity_id],
-                        "period": period,
-                    }
-                )
-                .to_string(),
-            ))
-            .await?;
-
-        loop {
-            let message = self.ws.next().await.context("Connection closed")??;
-
-            match message {
-                Message::Ping(bytes) => {
-                    self.ws.send(Message::Pong(bytes)).await?;
-                    continue;
-                }
-                Message::Text(text) => {
-                    let raw: Value = serde_json::from_str(&text)?;
-                    if raw["type"] != "result" || raw["id"].as_u64() != Some(id) {
-                        continue;
-                    }
-
-                    let msg: WsResultMessage<EntityStatistics> = serde_json::from_value(raw)?;
-                    if !msg.success {
-                        bail!("Failed to get statistics: {:?}", msg.error);
-                    }
-
-                    let result = msg.result.context("Missing result field in response")?;
-                    return Ok(result);
-                }
-                Message::Close(_) => bail!("Connection closed"),
-                _ => continue,
-            }
-        }
+        self.command(json!({
+            "type": "recorder/statistics_during_period",
+            "start_time": start,
+            "end_time": end,
+            "statistic_ids": entity_ids,
+            "period": period,
+            "types": ["mean"],
+            "units": { "power": "W" },
+        }))
+        .await
     }
 }

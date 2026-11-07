@@ -32,7 +32,7 @@ pub struct TriggerVariables {
 pub struct TriggerData {
     pub entity_id: String,
     pub from_state: Option<EntityState<Value>>,
-    pub to_state: EntityState<Value>,
+    pub to_state: Option<EntityState<Value>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,10 +52,7 @@ pub struct StatisticsEntry {
     pub start: Zoned,
     #[serde(deserialize_with = "ms_timestamp::deserialize")]
     pub end: Zoned,
-    pub max: f64,
-    pub mean: f64,
-    pub min: f64,
-    pub last_reset: Option<String>,
+    pub mean: Option<f64>,
 }
 
 mod ms_timestamp {

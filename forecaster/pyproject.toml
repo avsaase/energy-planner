@@ -1,0 +1,38 @@
+[project]
+name = "energy-planner-forecasting"
+version = "0.1.0"
+description = "Exports Chronos-2 to ONNX for the energy planner and backtests the exported model"
+requires-python = ">=3.12,<3.13"
+# Backtesting the exported model.
+dependencies = [
+    "numpy>=1.26",
+    "onnxruntime>=1.31.1",
+    "pandas>=2.2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+# Exporting the model (export_onnx.py, also the Docker build's `model` stage).
+export = [
+    "chronos-forecasting>=2.0",
+    "onnx>=1.23.2",
+    "onnxscript>=0.7.2",
+    "torch>=2.4",
+]
+
+[tool.uv]
+# Scripts only, nothing to install.
+package = false
+
+# CPU-only torch wheels on Linux (the Docker build); macOS wheels are CPU/MPS already.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
