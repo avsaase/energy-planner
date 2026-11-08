@@ -6,7 +6,7 @@ use jiff::{SignedDuration, Timestamp, Zoned, tz::TimeZone};
 use tracing::{info, warn};
 
 use crate::{
-    AppState, data_dir,
+    AppState,
     home_assistant::{addon::AddonOptions, client::HaClient},
     live::{SHORT_HISTORY, SharedLive, floor_to_minute},
     nowcast::{
@@ -21,7 +21,7 @@ use crate::{
 /// Live data whose newest P1 value is older than this is not used for the nowcast.
 const LIVE_DATA_MAX_AGE: SignedDuration = SignedDuration::from_mins(2);
 
-/// Inputs for one replan, plus what is needed to log it.
+/// Inputs for one replan, plus the nowcast they are based on (for the run log).
 pub struct PreparedInput {
     pub input: InputData,
     pub nowcast: Option<Nowcast>,
@@ -182,42 +182,6 @@ pub async fn prepare_optimizer_input(
         },
         nowcast,
     })
-}
-
-/// Appends one line per replan to `forecast_log.jsonl`: what was forecast for the first interval
-/// and what was measured at that moment, for validating and tuning the forecasts.
-pub fn append_forecast_log(
-    prepared: &PreparedInput,
-    measured_house_load_w: Option<f64>,
-    measured_net_load_w: Option<f64>,
-) -> anyhow::Result<()> {
-    use std::io::Write;
-
-    const MAX_LOG_BYTES: u64 = 50 * 1024 * 1024;
-    let path = data_dir().join("forecast_log.jsonl");
-    if std::fs::metadata(&path).is_ok_and(|m| m.len() > MAX_LOG_BYTES) {
-        std::fs::rename(&path, path.with_extension("jsonl.1"))?;
-    }
-    let first = prepared.input.intervals.first();
-    let line = serde_json::json!({
-        "at": Timestamp::now(),
-        "measured_house_load_w": measured_house_load_w,
-        "measured_net_load_w": measured_net_load_w,
-        "nowcast_house_load_w": prepared.nowcast.map(|n| n.current_house_load_w),
-        "first_interval": first.map(|i| serde_json::json!({
-            "start": i.start.timestamp(),
-            "end": i.end.timestamp(),
-            "house_load_w": i.house_load_forecast_w,
-            "solar_w": i.solar_forecast_w,
-        })),
-        "scenarios": prepared.input.scenarios,
-    });
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(file, "{line}")?;
-    Ok(())
 }
 
 /// Effective (import, export) price for `[start, end)` and whether any part is a forecast. An

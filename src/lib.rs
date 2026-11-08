@@ -22,6 +22,7 @@ pub mod optimizer;
 pub mod planning;
 pub mod plot;
 pub mod refresh;
+pub mod run_log;
 pub mod series;
 pub mod server;
 pub mod types;

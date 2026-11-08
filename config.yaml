@@ -59,6 +59,8 @@ options:
     soc_deviation: 0.03
     scenario_quantile: 0.9
     scenario_min_spread_w: 300
+  # Days of complete replan records (inputs and plans) kept in /data/runs; 0 disables.
+  run_log_days: 7
 schema:
   solar_forecast_entities:
     - str
@@ -102,3 +104,4 @@ schema:
     soc_deviation: float(0,1)
     scenario_quantile: float(0.5,0.99)
     scenario_min_spread_w: float
+  run_log_days: int(0,90)?

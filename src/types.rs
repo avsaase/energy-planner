@@ -35,7 +35,7 @@ pub struct ElectricityPrices {
     pub prices: Vec<ElectricityPrice>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputData {
     pub battery_parameters: BatteryParameters,
     pub intervals: Vec<InputInterval>,

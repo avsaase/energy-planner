@@ -1,6 +1,8 @@
 //! The web UI. The page loads the plan as JSON (`plan`) and follows updates over Server-Sent
 //! Events (`events`), falling back to polling `version` when events don't get through.
 //!
+//! Complete replan records can be downloaded per day from `runs` (see `run_log`).
+//!
 //! All routes are used with relative URLs from the page, so they work under Home Assistant's
 //! ingress path prefix. SSE through ingress needs HA Core with
 //! home-assistant/core#160704 (no compression of `text/event-stream`, 2026.3/2026.4).
@@ -10,8 +12,8 @@ use std::{convert::Infallible, time::Duration};
 use askama::Template;
 use axum::{
     Json, Router,
-    extract::State,
-    http::{HeaderName, StatusCode},
+    extract::{Path, State},
+    http::{HeaderName, StatusCode, header},
     response::{
         Html, IntoResponse,
         sse::{Event, Sse},
@@ -23,7 +25,7 @@ use jiff::{Unit, Zoned};
 use serde::Serialize;
 use tokio::sync::watch;
 
-use crate::{AppState, plot::generate_plots, types::Planning};
+use crate::{AppState, plot::generate_plots, run_log, types::Planning};
 
 /// Visible heartbeat on the event stream. The page falls back to polling if it receives neither
 /// a plan update nor a ping for a while (a buffering proxy delivers neither).
@@ -35,6 +37,8 @@ pub fn router(app_state: AppState) -> Router {
         .route("/plan", get(plan))
         .route("/version", get(version))
         .route("/events", get(events))
+        .route("/runs", get(runs))
+        .route("/runs/{name}", get(run_file))
         .with_state(app_state)
 }
 
@@ -144,6 +148,39 @@ fn overview(planning: &Planning) -> OverviewTemplate {
 
 async fn version(State(app_state): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({ "version": *app_state.plan_version.borrow() }))
+}
+
+#[derive(Serialize)]
+struct RunFileResponse {
+    name: String,
+    bytes: u64,
+}
+
+/// The downloadable run log files, newest first.
+async fn runs() -> Json<Vec<RunFileResponse>> {
+    Json(
+        run_log::list_files()
+            .into_iter()
+            .map(|(name, bytes)| RunFileResponse { name, bytes })
+            .collect(),
+    )
+}
+
+async fn run_file(Path(name): Path<String>) -> Result<impl IntoResponse, StatusCode> {
+    let path = run_log::file_path(&name).ok_or(StatusCode::NOT_FOUND)?;
+    let bytes = tokio::fs::read(path)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/gzip".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{name}\""),
+            ),
+        ],
+        bytes,
+    ))
 }
 
 /// `plan` events carry the plan version: the current one right away, then one per new plan.

@@ -21,6 +21,13 @@ pub struct AddonOptions {
     pub forecaster: ForecasterOptions,
     #[serde(default)]
     pub replanning: ReplanOptions,
+    /// Days of complete replan records (inputs and plans) kept for debugging; 0 disables.
+    #[serde(default = "default_run_log_days")]
+    pub run_log_days: u32,
+}
+
+fn default_run_log_days() -> u32 {
+    7
 }
 
 /// Live power sensors. Values are normalised to the sign conventions documented in `live.rs`

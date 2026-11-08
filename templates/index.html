@@ -65,6 +65,17 @@
             font-weight: 600;
         }
 
+        .runs {
+            margin: 1.5rem 0 0;
+            font-size: 0.9rem;
+            color: #555;
+        }
+
+        .runs a {
+            margin-right: 0.9rem;
+            white-space: nowrap;
+        }
+
         .empty {
             border: 1px solid #ddd;
             border-radius: 8px;
@@ -109,6 +120,7 @@
         <div id="plots"></div>
         <p class="meta" id="no-plan" hidden>No planning result available yet.</p>
         <div class="empty" id="no-plan-detail" hidden>The optimizer has not published a planning result yet.</div>
+        <p class="runs" id="runs" hidden>Replan records (inputs and plans, one gzipped JSON line per replan): </p>
     </main>
     <script>
         // Relative URLs: the page may be served under Home Assistant's ingress path prefix.
@@ -193,7 +205,28 @@
                 }, POLL_INTERVAL_MS);
             };
 
+            const loadRuns = async () => {
+                try {
+                    const response = await fetch("runs", { cache: "no-store" });
+                    if (!response.ok) return;
+                    const files = await response.json();
+                    const runs = document.getElementById("runs");
+                    runs.querySelectorAll("a").forEach((a) => a.remove());
+                    files.forEach(({ name, bytes }) => {
+                        const link = document.createElement("a");
+                        link.href = `runs/${encodeURIComponent(name)}`;
+                        link.download = name;
+                        link.textContent = `${name.slice(0, 10)} (${(bytes / 1e6).toFixed(1)} MB)`;
+                        runs.appendChild(link);
+                    });
+                    runs.hidden = files.length === 0;
+                } catch (e) {
+                    console.warn("Failed to list replan records", e);
+                }
+            };
+
             refresh();
+            loadRuns();
 
             if (!window.EventSource) {
                 startPolling();

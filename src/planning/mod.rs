@@ -20,9 +20,10 @@ use crate::{
     home_assistant::{addon::AddonOptions, client::HaClient},
     live::SharedLive,
     optimizer, planning_path,
+    run_log::{RunLog, RunRecord},
     types::Planning,
 };
-use input::{append_forecast_log, prepare_optimizer_input};
+use input::prepare_optimizer_input;
 
 /// Replan this long after the plan's first interval ends, to be safely inside the next one.
 const AFTER_INTERVAL_END: Duration = Duration::from_secs(1);
@@ -48,6 +49,7 @@ pub async fn planning_loop(
     let mut last_start: Option<Instant> = None;
     let mut next_replan = tokio::time::Instant::now() + RETRY_AFTER_FAILURE;
     let mut controller = BatteryController::new(ha_client.clone());
+    let run_log = RunLog::new(options.run_log_days);
 
     loop {
         tokio::select! {
@@ -88,28 +90,42 @@ pub async fn planning_loop(
             };
         let prepare_ms = start.elapsed().as_millis();
 
-        if let Err(e) = append_forecast_log(&prepared, measured_house_load, measured_net_load) {
-            warn!(error = %e, "Failed to write forecast log");
-        }
-
         let start = Instant::now();
         let input = prepared.input;
+        let solve_input = input.clone();
         let now_cloned = now.clone();
-        let planning = match spawn_blocking(move || optimizer::solve(input, now_cloned)).await {
-            Ok(Ok(planning)) => planning,
-            Ok(Err(e)) => {
-                error!(error = format!("{e:#}"), "Error in solver");
-                continue;
-            }
+        let result = spawn_blocking(move || optimizer::solve(solve_input, now_cloned))
+            .await
+            .map_err(|e| anyhow::anyhow!("Solver panicked: {e}"))
+            .and_then(|result| result.context("Error in solver"));
+        let solve_ms = start.elapsed().as_millis();
+
+        let record = RunRecord {
+            planned_at: &now,
+            measured_house_load_w: measured_house_load,
+            measured_net_load_w: measured_net_load,
+            nowcast: prepared.nowcast,
+            input: &input,
+            planning: result.as_ref().ok(),
+            error: result.as_ref().err().map(|e| format!("{e:#}")),
+            prepare_ms,
+            solve_ms,
+        };
+        if let Err(e) = run_log.append(&record) {
+            warn!(error = %e, "Failed to write run log");
+        }
+
+        let planning = match result {
+            Ok(planning) => planning,
             Err(e) => {
-                error!(error = %e, "Solver panicked");
+                error!(error = format!("{e:#}"), "Planning failed");
                 continue;
             }
         };
         info!(
             intervals = planning.intervals.len(),
             prepare_ms,
-            solve_ms = start.elapsed().as_millis(),
+            solve_ms,
             intent = ?planning.intervals.first().map(|i| &i.battery_intent),
             "Completed planning"
         );

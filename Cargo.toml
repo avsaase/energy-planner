@@ -24,6 +24,7 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # ONNX Runtime for the forecast model; `download-binaries` links a prebuilt runtime statically.
 ort = { version = "2.0.0-rc.15", default-features = false, features = ["std", "tracing", "download-binaries", "tls-native"] }
+flate2 = "1.1.11"
 
 [dev-dependencies]
 tokio = { version = "1.51.1", features = ["full", "test-util"] }

@@ -1,6 +1,7 @@
 //! Combining the long-range forecast with live measurements into optimizer inputs.
 
 use jiff::{SignedDuration, Timestamp};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     forecaster::empirical_quantile, forecasts::LongRangeForecast, live::floor_to_minute,
@@ -64,7 +65,7 @@ pub fn interval_mean(
 }
 
 /// The latest measurement, to correct the start of the long-range forecast.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Nowcast {
     /// Start of the minute containing "now"; minute 0 of the blend.
     pub start: Timestamp,
