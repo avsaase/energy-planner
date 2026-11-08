@@ -1,5 +1,6 @@
-//! Refreshes the slowly changing planning inputs every 15 minutes: electricity prices, the
-//! solar forecast and the long-range house load forecast.
+//! Refreshes the slowly changing planning inputs every 15 minutes: the solar forecast and the
+//! long-range house load forecast, and once an hour the electricity prices (bare EPEX prices from
+//! epexpredictor; tax, VAT and supplier costs are added from the add-on options).
 
 use std::{sync::Arc, time::Duration, time::Instant};
 
@@ -42,7 +43,22 @@ pub async fn refresh_loop(
             });
         if prices_stale {
             match epex_client.fetch_electricity_prices().await {
-                Ok(prices) => app_state.write().await.electricty_prices = Some(prices),
+                Ok(prices) => {
+                    // Published day-ahead prices; after that the service's own prediction.
+                    let known_until = prices
+                        .prices
+                        .iter()
+                        .filter(|p| !p.is_forecast)
+                        .map(|p| &p.end)
+                        .max();
+                    info!(
+                        known_until = %known_until.map_or("-".into(), |t| t.to_string()),
+                        forecast_until = %prices.prices.iter().map(|p| &p.end).max()
+                            .map_or("-".into(), |t| t.to_string()),
+                        "Updated electricity prices"
+                    );
+                    app_state.write().await.electricty_prices = Some(prices);
+                }
                 Err(e) => error!(error = %e, "Failed to fetch electricity prices"),
             }
         }
