@@ -11,7 +11,6 @@ use crate::{
 #[derive(Debug, Clone, Deserialize)]
 pub struct AddonOptions {
     pub solar_forecast_entities: Vec<String>,
-    pub electricity_price_entity: String,
     pub battery_parameters: BatteryParameters,
     pub electricity_price_parameters: ElectricityPriceParameters,
     pub battery_soc_entity: String,

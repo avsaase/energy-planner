@@ -18,7 +18,6 @@ options:
     - "sensor.energy_production_today_2"
     - "sensor.energy_production_tomorrow_2"
     - "sensor.energy_production_d2"
-  electricity_price_entity: "sensor.frank_energie_prijzen_huidige_elektriciteit_inkoopprijs"
   battery_parameters:
     capacity_wh: 5120
     lifetime_cycles: 6000
@@ -64,7 +63,6 @@ options:
 schema:
   solar_forecast_entities:
     - str
-  electricity_price_entity: str
   battery_parameters:
     capacity_wh: float
     lifetime_cycles: int
