@@ -5,7 +5,7 @@
 use std::{sync::Arc, time::Duration, time::Instant};
 
 use jiff::{RoundMode, ToSpan, Unit, Zoned, ZonedRound};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::{
     AppState,
@@ -44,19 +44,6 @@ pub async fn refresh_loop(
         if prices_stale {
             match epex_client.fetch_electricity_prices().await {
                 Ok(prices) => {
-                    // Published day-ahead prices; after that the service's own prediction.
-                    let known_until = prices
-                        .prices
-                        .iter()
-                        .filter(|p| !p.is_forecast)
-                        .map(|p| &p.end)
-                        .max();
-                    info!(
-                        known_until = %known_until.map_or("-".into(), |t| t.to_string()),
-                        forecast_until = %prices.prices.iter().map(|p| &p.end).max()
-                            .map_or("-".into(), |t| t.to_string()),
-                        "Updated electricity prices"
-                    );
                     app_state.write().await.electricty_prices = Some(prices);
                 }
                 Err(e) => error!(error = %e, "Failed to fetch electricity prices"),
@@ -88,7 +75,7 @@ pub async fn refresh_loop(
                 );
                 app_state.write().await.long_range = Some(forecast);
             }
-            Err(e) => error!(error = format!("{e:#}"), "Long-range forecast failed"),
+            Err(e) => error!(error = ?e, "Long-range forecast failed"),
         }
 
         app_state.start_plan.notify_one();
@@ -117,7 +104,7 @@ async fn sleep_till_next_refresh() {
     }
     duration += Duration::from_micros(1);
 
-    info!(
+    debug!(
         duration_secs = %duration.as_secs(),
         "Sleeping until next refresh"
     );

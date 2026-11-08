@@ -9,6 +9,7 @@ use std::{
 };
 
 use anyhow::Context;
+use itertools::izip;
 use jiff::{SignedDuration, Timestamp};
 use tokio::task::spawn_blocking;
 use tracing::{info, warn};
@@ -115,6 +116,7 @@ impl StatisticsCache {
                     }
                 }
             }
+            // Purge old data to avoid unbounded memory growth.
             for points in cache.values_mut() {
                 *points = points.split_off(&from);
             }
@@ -135,26 +137,24 @@ impl StatisticsCache {
         let grid = self.slots(&sensors.grid_power_entity, start, n);
         let solar = self.slots(&sensors.solar_power_entity, start, n);
         let battery = self.slots(&sensors.battery_power_entity, start, n);
-        (0..n)
-            .map(|i| {
-                sign(sensors.grid_power_invert) * grid[i]
-                    + solar[i]
-                    + sign(sensors.battery_power_invert) * battery[i]
-            })
+        let (grid_sign, battery_sign) = (
+            sign(sensors.grid_power_invert),
+            sign(sensors.battery_power_invert),
+        );
+        izip!(grid, solar, battery)
+            .map(|(grid, solar, battery)| grid_sign * grid + solar + battery_sign * battery)
             .collect()
     }
 
     /// Mean per 15-minute slot from `start`; `NaN` where neither resolution has data.
     pub fn slots(&self, entity: &str, start: Timestamp, n: usize) -> Vec<f64> {
-        let points = |cache: &HashMap<String, BTreeMap<Timestamp, f64>>| {
-            cache
-                .get(entity)
-                .into_iter()
-                .flatten()
-                .map(|(t, v)| (*t, *v))
-                .collect::<Vec<_>>()
-        };
-        let mut slots = aggregate_points(points(&self.five_minute), start, LONG_STEP, n);
+        let five_minute = self
+            .five_minute
+            .get(entity)
+            .into_iter()
+            .flatten()
+            .map(|(t, v)| (*t, *v));
+        let mut slots = aggregate_points(five_minute, start, LONG_STEP, n);
         let hourly = self.hourly.get(entity);
         for (i, slot) in slots.iter_mut().enumerate() {
             if slot.is_nan() {

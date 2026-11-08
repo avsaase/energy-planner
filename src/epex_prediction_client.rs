@@ -1,6 +1,7 @@
 use anyhow::Context;
 use jiff::{Timestamp, ToSpan, Zoned, tz::TimeZone};
 use serde::Deserialize;
+use tracing::info;
 
 use crate::types::{ElectricityPrice, ElectricityPrices};
 
@@ -33,6 +34,7 @@ impl EpexPredictionClient {
     }
 
     pub async fn fetch_electricity_prices(&self) -> anyhow::Result<ElectricityPrices> {
+        let time_zone = TimeZone::get("Europe/Amsterdam").expect("Valid time zone");
         let response: EpexPriceForecasts = self
             .client
             .get(EPEX_PREDICTOR_URL)
@@ -45,20 +47,27 @@ impl EpexPredictionClient {
             .await
             .context("Invalid resonse")?;
 
-        let known_until = &response.known_until;
-        let prices = response
+        // The known_until in the response is the start of the last known timestamp
+        let known_until = (response.known_until + 15.minutes()).to_zoned(time_zone.clone());
+        let prices: Vec<ElectricityPrice> = response
             .prices
             .into_iter()
             .map(|p| {
-                let start = p.starts_at.to_zoned(TimeZone::system());
+                let start = p.starts_at.to_zoned(time_zone.clone());
                 ElectricityPrice {
-                    is_forecast: p.starts_at >= *known_until,
+                    is_forecast: start >= known_until,
                     end: start.clone() + 15.minutes(),
                     start,
                     price_per_kwh: p.total,
                 }
             })
             .collect();
+
+        info!(
+            known_until = %known_until,
+            forecast_until = %&prices.last().map(|p| &p.end).unwrap_or(&known_until),
+            "Updated electricity prices"
+        );
 
         Ok(ElectricityPrices {
             updated_at: Zoned::now(),
