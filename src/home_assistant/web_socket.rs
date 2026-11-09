@@ -65,7 +65,7 @@ impl HaClient {
             bail!("Authentication failed");
         }
 
-        info!("Created authenticated websocket connection");
+        debug!("Created authenticated websocket connection");
 
         Ok(HaWebSocket { ws, next_id: 1 })
     }
