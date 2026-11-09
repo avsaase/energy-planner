@@ -221,6 +221,7 @@ fn build_and_solve(input_data: &InputData, now: &Zoned) -> anyhow::Result<Flows>
     );
     let grid_import = problem_variables.add_vector(variable().min(0.0), n);
     let grid_export = problem_variables.add_vector(variable().min(0.0), n);
+    let battery_export = problem_variables.add_vector(variable().min(0.0), n);
     let battery_charge_active = problem_variables.add_vector(variable().binary(), n);
     let battery_discharge_active = problem_variables.add_vector(variable().binary(), n);
 
@@ -253,6 +254,10 @@ fn build_and_solve(input_data: &InputData, now: &Zoned) -> anyhow::Result<Flows>
             * input_data.battery_parameters.cycle_cost_eur_per_wh()
             * duration_hours;
 
+        objective += battery_export[t]
+            * (input_data.solver_parameters.battery_export_penalty_per_kwh / 1000.0)
+            * duration_hours;
+
         // Small incentive for charging early to account for uncertain forecasts. Per Wh charged,
         // so scaled with the interval length like every other term.
         objective -= battery_charge[t]
@@ -277,6 +282,11 @@ fn build_and_solve(input_data: &InputData, now: &Zoned) -> anyhow::Result<Flows>
         problem.add_constraint(constraint!(
             interval.house_load_forecast_w + grid_export[t] + battery_charge[t]
                 == interval.solar_forecast_w + grid_import[t] + battery_discharge[t]
+        ));
+
+        let solar_surplus_w = (interval.solar_forecast_w - interval.house_load_forecast_w).max(0.0);
+        problem.add_constraint(constraint!(
+            battery_export[t] >= grid_export[t] - solar_surplus_w
         ));
 
         let bp = &input_data.battery_parameters;
@@ -534,6 +544,7 @@ mod tests {
             solver_parameters: SolverParameters {
                 early_charge_bonus_per_kwh: 0.0,
                 early_charge_bonus_decay_hours: 12,
+                battery_export_penalty_per_kwh: 0.0,
             },
             battery_current_soc_percent: soc,
             scenarios: NetLoadScenarios {
@@ -625,6 +636,49 @@ mod tests {
             !matches!(intent, BatteryIntent::FixedCharge { .. }),
             "{intent:?}"
         );
+    }
+
+    #[test]
+    fn battery_export_penalty_prevents_exporting_at_a_small_margin() {
+        // Exporting at 0.50 and buying back at 0.30 later pays after losses and cycle costs,
+        // but not with a 0.30 margin on top.
+        let prices = prices((0.60, 0.50), (0.30, 0.10));
+        let mut input = input(0.9, 300.0, &[0.0; 16], &prices);
+        assert!(
+            matches!(
+                first_intent(input.clone()),
+                BatteryIntent::FixedDischarge { .. }
+            ),
+            "exports without a penalty"
+        );
+        input.solver_parameters.battery_export_penalty_per_kwh = 0.30;
+        let intent = first_intent(input);
+        assert!(
+            !matches!(intent, BatteryIntent::FixedDischarge { .. }),
+            "{intent:?}"
+        );
+    }
+
+    #[test]
+    fn battery_export_penalty_does_not_apply_to_solar_surplus() {
+        // Solar covers the house all day: exporting the surplus beats storing it (cycle costs,
+        // nothing to use it for). Penalising all export would make storing it cheaper.
+        let input = input(0.5, 500.0, &[3000.0; 16], &[(0.25, 0.20); 16]);
+        let exported = |input: InputData| {
+            let now = input.intervals[0].start.clone();
+            solve(input, now)
+                .unwrap()
+                .intervals
+                .iter()
+                .map(|i| i.grid_export_w)
+                .sum::<f64>()
+        };
+        let without = exported(input.clone());
+        let mut penalised = input;
+        penalised.solver_parameters.battery_export_penalty_per_kwh = 0.30;
+        let with = exported(penalised);
+        assert!(without > 16.0 * 2400.0, "{without}");
+        assert!((with - without).abs() < 1.0, "{with} vs {without}");
     }
 
     #[test]

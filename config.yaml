@@ -34,6 +34,7 @@ options:
   solver_parameters:
     early_charge_bonus_per_kwh: 0.001
     early_charge_bonus_decay_hours: 12
+    battery_export_penalty_per_kwh: 0.0
   electricity_price_parameters:
     supplier_cost_import_eur_per_kwh: 0.0182
     supplier_cost_export_eur_per_kwh: -0.0182
@@ -79,6 +80,7 @@ schema:
   solver_parameters:
     early_charge_bonus_per_kwh: float
     early_charge_bonus_decay_hours: int(1,48)
+    battery_export_penalty_per_kwh: float(0,1)?
   electricity_price_parameters:
     supplier_cost_import_eur_per_kwh: float
     supplier_cost_export_eur_per_kwh: float

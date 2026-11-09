@@ -109,6 +109,8 @@ pub struct BatteryParameters {
 pub struct SolverParameters {
     pub early_charge_bonus_per_kwh: f64,
     pub early_charge_bonus_decay_hours: u8,
+    #[serde(default)]
+    pub battery_export_penalty_per_kwh: f64,
 }
 
 impl BatteryParameters {
