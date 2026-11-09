@@ -19,12 +19,21 @@ RUN uv run --no-sync python export_onnx.py --output /models/chronos2.onnx
 # --- Build the planner (ONNX Runtime is linked in statically) ---------------------------------
 # Same Debian release as the runtime base (trixie): the prebuilt ONNX Runtime needs glibc >= 2.38
 # and libstdc++ from GCC >= 13.
-FROM rust:1-trixie AS builder
+FROM lukemathwalker/cargo-chef:latest-rust-1-trixie AS chef
 # HiGHS (highs-sys) is built from source with cmake; bindgen needs libclang.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends cmake libclang-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
+
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY src src
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+COPY --from=planner /src/recipe.json recipe.json
+RUN cargo chef cook --release --locked --bin energy-planner --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock ./
 COPY src src
 COPY templates templates
