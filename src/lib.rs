@@ -70,7 +70,7 @@ impl Default for AppState {
 
 pub fn init_tracing() {
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().pretty())
+        .with(tracing_subscriber::fmt::layer().compact())
         .with(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive(LevelFilter::INFO.into())
