@@ -1,5 +1,5 @@
 name: "Energy Planner"
-version: "0.2.5"
+version: "0.2.6"
 slug: "energy_planner"
 description: "LP-based energy optimization"
 arch:
@@ -105,3 +105,4 @@ schema:
     scenario_quantile: float(0.5,0.99)
     scenario_min_spread_w: float
   run_log_days: int(0,90)?
+  log_level: list(trace|debug|info|warn|error)?

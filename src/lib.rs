@@ -2,8 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use derive_more::Deref;
 use tokio::sync::{Notify, RwLock, watch};
-use tracing::level_filters::LevelFilter;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::{
     forecasts::LongRangeForecast,
@@ -72,10 +71,8 @@ pub fn init_tracing() {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().compact())
         .with(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(LevelFilter::INFO.into())
-                // ONNX Runtime logs every graph optimization step at INFO.
-                .add_directive("ort=warn".parse().expect("valid directive")),
+            // ONNX Runtime logs every graph optimization step at INFO.
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info,ort=warn")),
         )
         .init();
 }
