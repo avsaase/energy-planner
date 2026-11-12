@@ -14,6 +14,8 @@ const COARSE_STEP: SignedDuration = SignedDuration::from_mins(15);
 /// The measured house load fades into the long-range forecast with this time constant. 20 min
 /// matched a 1-minute Chronos-2 forecast in the backtest (`backtest.py nowcast`).
 const NOWCAST_TAU_MINUTES: f64 = 20.0;
+/// The measured PV fades into the corrected forecast with this time constant. Not backtested.
+const SOLAR_NOWCAST_TAU_MINUTES: f64 = 10.0;
 /// Solar correction: the measured/forecast ratio fades with this time constant.
 const SOLAR_RATIO_DECAY_HOURS: f64 = 1.5;
 const SOLAR_RATIO_WINDOW_MINUTES: usize = 30;
@@ -69,8 +71,28 @@ pub fn interval_mean(
 pub struct Nowcast {
     /// Start of the minute containing "now"; minute 0 of the blend.
     pub start: Timestamp,
-    /// House load in the last complete minute.
+    /// House load averaged over the last few seconds.
     pub current_house_load_w: f64,
+    /// PV averaged over the last few seconds.
+    pub current_solar_w: f64,
+}
+
+impl Nowcast {
+    /// Weight of the measurement at minute `t`; `None` before the nowcast starts.
+    fn weight(&self, t: Timestamp, tau_minutes: f64) -> Option<f64> {
+        (t >= self.start).then(|| {
+            let minute = t.duration_since(self.start).as_secs_f64() / 60.0;
+            (-(minute + 0.5) / tau_minutes).exp()
+        })
+    }
+
+    /// PV at minute `t`: the measurement fading into `forecast_w`.
+    pub fn solar_at(&self, t: Timestamp, forecast_w: f64) -> f64 {
+        match self.weight(t, SOLAR_NOWCAST_TAU_MINUTES) {
+            Some(w) => w * self.current_solar_w + (1.0 - w) * forecast_w,
+            None => forecast_w,
+        }
+    }
 }
 
 /// House load per minute: the current measurement fading into the long-range forecast.
@@ -83,11 +105,12 @@ impl HouseLoad<'_> {
     /// Expected house load at minute `t`.
     pub fn mean_at(&self, t: Timestamp) -> Option<f64> {
         let long = self.long.house_load_at(t)?;
-        let Some(nowcast) = self.nowcast.filter(|n| t >= n.start) else {
+        let Some((nowcast, w)) = self
+            .nowcast
+            .and_then(|n| Some((n, n.weight(t, NOWCAST_TAU_MINUTES)?)))
+        else {
             return Some(long);
         };
-        let minute = t.duration_since(nowcast.start).as_secs_f64() / 60.0;
-        let w = (-(minute + 0.5) / NOWCAST_TAU_MINUTES).exp();
         Some(w * nowcast.current_house_load_w + (1.0 - w) * long)
     }
 }
@@ -252,6 +275,7 @@ mod tests {
             nowcast: Some(Nowcast {
                 start,
                 current_house_load_w: 1100.0,
+                current_solar_w: 0.0,
             }),
             long: &long,
         };
@@ -265,6 +289,20 @@ mod tests {
             long: &long,
         };
         assert_eq!(without.mean_at(ts(0, 0, 0)), Some(100.0));
+    }
+
+    #[test]
+    fn measured_solar_fades_into_forecast() {
+        let n = Nowcast {
+            start: ts(12, 0, 0),
+            current_house_load_w: 300.0,
+            current_solar_w: 1500.0,
+        };
+        let at = |m| n.solar_at(ts(12, m, 0), 400.0);
+        assert!((at(0) - 1446.0).abs() < 1.0, "{}", at(0));
+        assert!((at(10) - (400.0 + 1100.0 * (-1.05f64).exp())).abs() < 1e-9);
+        assert!((at(60) - 400.0).abs() < 3.0);
+        assert_eq!(n.solar_at(ts(11, 59, 0), 400.0), 400.0);
     }
 
     #[test]

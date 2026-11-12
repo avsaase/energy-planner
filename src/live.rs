@@ -156,6 +156,10 @@ impl LiveData {
         Some(mean(&self.grid)? + mean(&self.solar)? + mean(&self.battery)?)
     }
 
+    pub fn recent_solar_w(&self, now: Timestamp, window: SignedDuration) -> Option<f64> {
+        recent_mean(&self.solar, now, window)
+    }
+
     /// Battery state of charge as a fraction.
     pub fn soc(&self, now: Timestamp) -> Option<f64> {
         self.soc.value_at(now)

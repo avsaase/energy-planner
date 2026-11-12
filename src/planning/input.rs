@@ -57,7 +57,7 @@ pub async fn prepare_optimizer_input(
     let now_ts = now.timestamp();
     let tz = TimeZone::system();
 
-    // The current house load over the same window the change detector waits for, so a
+    // Current house load and PV over the same window the change detector waits for, so a
     // triggered replan sees the new level. Last 24 h per minute: the PV history for the solar
     // correction and the house load history for the scenario spread.
     let window =
@@ -66,21 +66,20 @@ pub async fn prepare_optimizer_input(
         let live = live.lock().unwrap();
         (
             live.minute_history(now_ts, SHORT_HISTORY.as_mins() as usize),
-            live.recent_house_load_w(now_ts, window),
+            live.recent_house_load_w(now_ts, window)
+                .zip(live.recent_solar_w(now_ts, window)),
             live.is_fresh(now_ts, LIVE_DATA_MAX_AGE),
         )
     };
     // Stale data (missed updates not filled in yet) would extend old values over the gap.
     let current = current.filter(|_| fresh);
     if current.is_none() {
-        warn!(
-            fresh,
-            "No current house load measurement, using the long-range forecast only"
-        );
+        warn!(fresh, "No current measurement, using the forecasts only");
     }
-    let nowcast = current.map(|w| Nowcast {
+    let nowcast = current.map(|(house_load, solar)| Nowcast {
         start: floor_to_minute(now_ts),
-        current_house_load_w: w,
+        current_house_load_w: house_load,
+        current_solar_w: solar,
     });
     let house_load = HouseLoad {
         nowcast,
@@ -116,7 +115,8 @@ pub async fn prepare_optimizer_input(
             let house_load = interval_mean(start, end, |t| house_load.mean_at(t))?;
             let solar = interval_mean(start, end, |t| {
                 let hours_ahead = t.duration_since(now_ts).as_secs_f64() / 3600.0;
-                solar_at(t).map(|w| solar_correction.apply(w, hours_ahead))
+                let corrected = solar_correction.apply(solar_at(t)?, hours_ahead);
+                Some(nowcast.map_or(corrected, |n| n.solar_at(t, corrected)))
             })?;
             let start = start.to_zoned(tz.clone());
             let end = end.to_zoned(tz.clone());
