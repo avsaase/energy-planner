@@ -149,6 +149,13 @@ impl LiveData {
         Some(self.net_load_w(now)? + self.solar.value_at(now)?)
     }
 
+    /// House load averaged over the `window` before `now`. Short enough to reflect a change that
+    /// just triggered a replan, long enough to smooth out meters updating at different times.
+    pub fn recent_house_load_w(&self, now: Timestamp, window: SignedDuration) -> Option<f64> {
+        let mean = |m: &Meter| recent_mean(m, now, window);
+        Some(mean(&self.grid)? + mean(&self.solar)? + mean(&self.battery)?)
+    }
+
     /// Battery state of charge as a fraction.
     pub fn soc(&self, now: Timestamp) -> Option<f64> {
         self.soc.value_at(now)
@@ -178,6 +185,11 @@ impl LiveData {
             solar,
         }
     }
+}
+
+fn recent_mean(meter: &Meter, now: Timestamp, window: SignedDuration) -> Option<f64> {
+    let mean = meter.series.bucket_means(now - window, window, 1, now)[0];
+    mean.is_finite().then_some(mean)
 }
 
 pub fn floor_to_minute(t: Timestamp) -> Timestamp {
@@ -476,6 +488,23 @@ mod tests {
         live.record("sensor.grid", ts(16 * 60 + 20), 470.0);
         assert_eq!(live.minute_history(now, 1).house_load, vec![463.0]);
         assert!(live.is_fresh(now, SignedDuration::from_mins(2)));
+    }
+
+    #[test]
+    fn recent_house_load_reflects_a_change_within_the_window() {
+        let mut live = live_data();
+        live.record("sensor.solar", ts(0), 0.0);
+        live.record("sensor.battery", ts(0), 0.0);
+        live.record("sensor.grid", ts(0), 2000.0);
+        live.record("sensor.grid", ts(100), 300.0);
+        let window = SignedDuration::from_secs(15);
+        assert_eq!(live.recent_house_load_w(ts(115), window), Some(300.0));
+        // The last complete minute (60..120) still mostly holds the old level.
+        assert!(live.minute_history(ts(120), 1).house_load[0] > 1400.0);
+        let partial = live.recent_house_load_w(ts(105), window).unwrap();
+        assert!((partial - 1433.3).abs() < 0.1, "{partial}");
+        live.record("sensor.solar", ts(110), f64::NAN);
+        assert_eq!(live.recent_house_load_w(ts(130), window), None);
     }
 
     #[test]

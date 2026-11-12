@@ -57,27 +57,21 @@ pub async fn prepare_optimizer_input(
     let now_ts = now.timestamp();
     let tz = TimeZone::system();
 
-    // Last 24 h per minute: the current value for the nowcast, the PV history for the solar
+    // The current house load over the same window the change detector waits for, so a
+    // triggered replan sees the new level. Last 24 h per minute: the PV history for the solar
     // correction and the house load history for the scenario spread.
-    let (history, live_house_load, fresh) = {
+    let window =
+        SignedDuration::from_secs(addon_options.replanning.net_load_change_sustain_seconds as i64);
+    let (history, current, fresh) = {
         let live = live.lock().unwrap();
         (
             live.minute_history(now_ts, SHORT_HISTORY.as_mins() as usize),
-            live.house_load_w(now_ts),
+            live.recent_house_load_w(now_ts, window),
             live.is_fresh(now_ts, LIVE_DATA_MAX_AGE),
         )
     };
     // Stale data (missed updates not filled in yet) would extend old values over the gap.
-    let current = fresh
-        .then(|| {
-            history
-                .house_load
-                .last()
-                .copied()
-                .filter(|v| v.is_finite())
-                .or(live_house_load)
-        })
-        .flatten();
+    let current = current.filter(|_| fresh);
     if current.is_none() {
         warn!(
             fresh,
