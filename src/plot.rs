@@ -4,7 +4,7 @@ use plotly::{
     Bar, Configuration, Plot, Scatter,
     common::{Anchor, DashType, Line, LineShape, Marker, Mode, Orientation, TickMode},
     configuration::DisplayModeBar,
-    layout::{Axis, AxisType, BarMode, Layout, Legend, Margin},
+    layout::{Axis, AxisType, BarMode, Layout, Legend, Margin, Shape, ShapeLine, ShapeType},
 };
 
 /// The plan's charts as `(element id, figure)`, in display order.
@@ -306,6 +306,7 @@ fn base_layout(title: &str, y_axis_label: &str, start_times: &[&Zoned]) -> Layou
                 .tick_angle(-45.0),
         )
         .y_axis(Axis::new().title(y_axis_label))
+        .shapes(day_boundary_shapes(start_times))
         .legend(
             Legend::new()
                 .orientation(Orientation::Horizontal)
@@ -314,6 +315,26 @@ fn base_layout(title: &str, y_axis_label: &str, start_times: &[&Zoned]) -> Layou
                 .y(-0.2)
                 .y_anchor(Anchor::Top),
         )
+}
+
+/// Vertical lines marking each midnight in the planned window, so day
+/// transitions stand out from the hourly grid.
+fn day_boundary_shapes(start_times: &[&Zoned]) -> Vec<Shape> {
+    start_times
+        .iter()
+        .enumerate()
+        .filter(|(i, t)| *i > 0 && t.hour() == 0 && t.minute() == 0)
+        .map(|(i, _)| {
+            Shape::new()
+                .shape_type(ShapeType::Line)
+                .x0(i as f64)
+                .x1(i as f64)
+                .y_ref("paper")
+                .y0(0.0)
+                .y1(1.0)
+                .line(ShapeLine::new().color("#64748b").width(1.5))
+        })
+        .collect()
 }
 
 fn base_configuration() -> Configuration {
