@@ -4,7 +4,9 @@ use plotly::{
     Bar, Configuration, Plot, Scatter,
     common::{Anchor, DashType, Line, LineShape, Marker, Mode, Orientation, TickMode},
     configuration::DisplayModeBar,
-    layout::{Axis, AxisType, BarMode, Layout, Legend, Margin, Shape, ShapeLine, ShapeType},
+    layout::{
+        Axis, AxisType, BarMode, Layout, Legend, Margin, Shape, ShapeLayer, ShapeLine, ShapeType,
+    },
 };
 
 /// The plan's charts as `(element id, figure)`, in display order.
@@ -306,7 +308,7 @@ fn base_layout(title: &str, y_axis_label: &str, start_times: &[&Zoned]) -> Layou
                 .tick_angle(-45.0),
         )
         .y_axis(Axis::new().title(y_axis_label))
-        .shapes(day_boundary_shapes(start_times))
+        .shapes(alternate_day_shapes(start_times))
         .legend(
             Legend::new()
                 .orientation(Orientation::Horizontal)
@@ -317,22 +319,34 @@ fn base_layout(title: &str, y_axis_label: &str, start_times: &[&Zoned]) -> Layou
         )
 }
 
-/// Vertical lines marking each midnight in the planned window, so day
-/// transitions stand out from the hourly grid.
-fn day_boundary_shapes(start_times: &[&Zoned]) -> Vec<Shape> {
-    start_times
-        .iter()
+/// Very light background bands covering every other day, so day transitions
+/// stand out without drawing over the traces.
+fn alternate_day_shapes(start_times: &[&Zoned]) -> Vec<Shape> {
+    let mut day_starts: Vec<f64> = vec![0.0];
+    day_starts.extend(
+        start_times
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| *i > 0 && t.hour() == 0 && t.minute() == 0)
+            .map(|(i, _)| i as f64),
+    );
+    day_starts.push(start_times.len() as f64);
+
+    day_starts
+        .windows(2)
         .enumerate()
-        .filter(|(i, t)| *i > 0 && t.hour() == 0 && t.minute() == 0)
-        .map(|(i, _)| {
+        .filter(|(day, _)| day % 2 == 1)
+        .map(|(_, bounds)| {
             Shape::new()
-                .shape_type(ShapeType::Line)
-                .x0(i as f64)
-                .x1(i as f64)
+                .shape_type(ShapeType::Rect)
+                .x0(bounds[0])
+                .x1(bounds[1])
                 .y_ref("paper")
                 .y0(0.0)
                 .y1(1.0)
-                .line(ShapeLine::new().color("#64748b").width(1.5))
+                .layer(ShapeLayer::Below)
+                .line(ShapeLine::new().width(0.0))
+                .fill_color("#f1f5f9")
         })
         .collect()
 }
